@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="ko" class="bg-[#0B0B0D] text-white">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RunSweat - 러닝 숙제 챌린지 (프리뷰 데모)</title>
+  
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              black: '#0B0B0D',
+              charcoal: '#16161F',
+              card: '#1F1F2E',
+              neon: '#39FF14',
+              cyan: '#00F0FF',
+              red: '#FF3E3E',
+              orange: '#FF8A00'
+            }
+          },
+          fontFamily: {
+            outfit: ['Outfit', 'sans-serif'],
+            inter: ['Inter', 'sans-serif'],
+          },
+          boxShadow: {
+            'neon-glow': '0 0 15px rgba(57, 255, 20, 0.4)',
+            'cyan-glow': '0 0 15px rgba(0, 240, 255, 0.4)',
+            'red-glow': '0 0 15px rgba(255, 62, 62, 0.4)',
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- React & Babel CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <style>
+    body {
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(57, 255, 20, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(0, 240, 255, 0.05) 0px, transparent 50%),
+        radial-gradient(at 50% 100%, rgba(255, 62, 62, 0.03) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+    @keyframes neon-pulse {
+      0%, 100% {
+        box-shadow: 0 0 15px rgba(57, 255, 20, 0.4);
+        border-color: rgba(57, 255, 20, 1);
+      }
+      50% {
+        box-shadow: 0 0 25px rgba(57, 255, 20, 0.7);
+        border-color: rgba(57, 255, 20, 0.8);
+      }
+    }
+    @keyframes danger-pulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.7;
+        transform: scale(0.98);
+      }
+    }
+    .animate-neon-pulse {
+      animation: neon-pulse 2s infinite ease-in-out;
+    }
+    .animate-danger-pulse {
+      animation: danger-pulse 1.5s infinite ease-in-out;
+    }
+    .glass-panel {
+      background: rgba(22, 22, 31, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="font-inter antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // React Lucide Wrapper
+    const Icon = ({ name, size = 16, className = "" }) => {
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      }, [name]);
+      return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`}></i>;
+    };
+
+    // 1. Dashboard Component
+    function Dashboard({ currentUser, onUploadSuccess }) {
+      const [dragActive, setDragActive] = useState(false);
+      const [showModal, setShowModal] = useState(false);
+      const [uploadFile, setUploadFile] = useState(null);
+      const [runTime, setRunTime] = useState("07:30");
+      const [runDistance, setRunDistance] = useState("5.2");
+      const [runDuration, setRunDuration] = useState("35");
+      const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      const [isUrgent, setIsUrgent] = useState(false);
+
+      useEffect(() => {
+        const calculateTimeLeft = () => {
+          const now = new Date();
+          const currentDay = now.getDay();
+          let target = new Date();
+          target.setHours(12, 0, 0, 0);
+
+          let daysUntilFriday = 5 - currentDay;
+          if (daysUntilFriday < 0 || (daysUntilFriday === 0 && now.getHours() >= 12)) {
+            daysUntilFriday += 7;
+          }
+          
+          target.setDate(now.getDate() + daysUntilFriday);
+          const difference = target.getTime() - now.getTime();
+          
+          if (difference <= 0) {
+            return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+          }
+
+          if (difference < 24 * 60 * 60 * 1000) {
+            setIsUrgent(true);
+          } else {
+            setIsUrgent(false);
+          }
+
+          return {
+            days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+            hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+            minutes: Math.floor((difference / 1000 / 60) % 60),
+            seconds: Math.floor((difference / 1000) % 60)
+          };
+        };
+
+        const timer = setInterval(() => {
+          setTimeLeft(calculateTimeLeft());
+        }, 1000);
+
+        setTimeLeft(calculateTimeLeft());
+        return () => clearInterval(timer);
+      }, []);
+
+      const handleDrag = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === "dragenter" || e.type === "dragover") {
+          setDragActive(true);
+        } else if (e.type === "dragleave") {
+          setDragActive(false);
+        }
+      };
+
+      const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActive(false);
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          setUploadFile(e.dataTransfer.files[0]);
+          setShowModal(true);
+        }
+      };
+
+      const handleFileChange = (e) => {
+        e.preventDefault();
+        if (e.target.files && e.target.files[0]) {
+          setUploadFile(e.target.files[0]);
+          setShowModal(true);
+        }
+      };
+
+      const submitRunAuth = () => {
+        const distance = parseFloat(runDistance);
+        const duration = parseFloat(runDuration);
+        const hour = parseInt(runTime.split(":")[0]);
+        
+        const isValidDistanceOrTime = distance >= 5.0 || duration >= 30;
+        const isMorning = hour >= 5 && hour < 9;
+
+        if (!isValidDistanceOrTime) {
+          alert("❌ 운동 불인정! 5km 이상 또는 30분 이상 달리기 기준을 만족해야 합니다.");
+          return;
+        }
+
+        onUploadSuccess({
+          distance,
+          duration,
+          time: runTime,
+          isMorning,
+          date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' })
+        });
+
+        setShowModal(false);
+        setUploadFile(null);
+      };
+
+      const morningRuns = currentUser.morningRuns;
+      const totalRuns = currentUser.totalRuns;
+      const isMorningTargetMet = morningRuns >= 3;
+      const isTotalTargetMet = totalRuns >= 4;
+
+      return (
+        <div className="space-y-8">
+          {/* Countdown timer */}
+          <div className={`glass-panel rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between transition-all duration-300 ${isUrgent ? 'border-brand-red/50 shadow-red-glow' : 'border-slate-800'}`}>
+            <div className="flex items-center gap-4 mb-4 md:mb-0">
+              <div className={`p-3 rounded-full ${isUrgent ? 'bg-brand-red/20 text-brand-red animate-pulse' : 'bg-brand-neon/10 text-brand-neon'}`}>
+                <Icon name="timer" size={28} />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-300">주간 숙제 집계 마감까지</h2>
+                <p className="text-xs text-slate-400">매주 토요일 00:00 ~ 금요일 12:00 AM (저녁 러닝 제외)</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 font-outfit">
+              <div className="flex flex-col items-center">
+                <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.days).padStart(2, '0')}</span>
+                <span className="text-[10px] text-slate-400 mt-1 uppercase">Days</span>
+              </div>
+              <span className="text-xl text-slate-500 font-bold">:</span>
+              <div className="flex flex-col items-center">
+                <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.hours).padStart(2, '0')}</span>
+                <span className="text-[10px] text-slate-400 mt-1 uppercase">Hours</span>
+              </div>
+              <span className="text-xl text-slate-500 font-bold">:</span>
+              <div className="flex flex-col items-center">
+                <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.minutes).padStart(2, '0')}</span>
+                <span className="text-[10px] text-slate-400 mt-1 uppercase">Min</span>
+              </div>
+              <span className="text-xl text-slate-500 font-bold">:</span>
+              <div className="flex flex-col items-center">
+                <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red animate-pulse' : 'text-brand-cyan'}`}>{String(timeLeft.seconds).padStart(2, '0')}</span>
+                <span className="text-[10px] text-slate-400 mt-1 uppercase">Sec</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Upload & gauges */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-5 flex flex-col">
+              <div className="glass-panel rounded-2xl p-6 flex-1 flex flex-col justify-between border-slate-800">
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-semibold text-lg">오늘의 러닝 숙제 인증</h3>
+                    <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full font-medium">1일 최대 1회</span>
+                  </div>
+                  <p className="text-sm text-slate-400 mb-6">
+                    가민, 스트라바 등 러닝 기록 캡처 이미지를 올려주세요. <br />
+                    자동 판정을 통해 숙제 달성 여부를 결정합니다.
+                  </p>
+                </div>
+
+                {currentUser.todayCompleted ? (
+                  <div className="border border-brand-neon/40 bg-brand-neon/5 rounded-xl p-8 flex flex-col items-center justify-center text-center animate-neon-pulse">
+                    <Icon name="check-circle" size={56} className="text-brand-neon mb-3" />
+                    <h4 className="text-lg font-bold text-white mb-1">오늘 숙제 제출 완료!</h4>
+                    <p className="text-xs text-brand-neon font-medium font-outfit mb-3">{currentUser.lastRunType === 'morning' ? '⚡️ 아침 러닝 인정 (5AM-9AM)' : '🏃‍♂️ 일반 러닝 인정'}</p>
+                    <div className="bg-brand-charcoal text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700">
+                      {currentUser.lastDistance}km / {currentUser.lastDuration}분 / {currentUser.lastTime}인증
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all cursor-pointer ${
+                      dragActive 
+                        ? 'border-brand-cyan bg-brand-cyan/5 shadow-cyan-glow scale-[1.01]' 
+                        : 'border-slate-700 bg-brand-charcoal hover:border-slate-500'
+                    }`}
+                    onClick={() => document.getElementById("file-upload").click()}
+                  >
+                    <input 
+                      id="file-upload" 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={handleFileChange}
+                    />
+                    <div className="p-4 rounded-full bg-slate-800 text-slate-400 mb-4 hover:scale-115 transition-transform">
+                      <Icon name="upload" size={32} />
+                    </div>
+                    <p className="font-semibold text-sm mb-1 text-slate-200">러닝 기록 스크린샷 드롭 또는 클릭</p>
+                    <p className="text-xs text-slate-500">Strava, Garmin, Nike Run Club 등</p>
+                  </div>
+                )}
+
+                <div className="mt-6 bg-slate-900/50 rounded-xl p-4 border border-slate-800 text-xs space-y-2">
+                  <div className="flex gap-2 text-slate-300">
+                    <Icon name="activity" size={14} className="text-brand-cyan shrink-0 mt-0.5" />
+                    <span>**운동 인정 기준**: 5km 이상 달리기 또는 30분 이상 달리기 완료 시 1회 인정</span>
+                  </div>
+                  <div className="flex gap-2 text-slate-300">
+                    <Icon name="alert-triangle" size={14} className="text-brand-orange shrink-0 mt-0.5" />
+                    <span>**아침 러닝 인정**: [오전 5시 ~ 오전 9시] 사이 활동 시작 기록 기준</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-7 flex flex-col">
+              <div className="glass-panel rounded-2xl p-6 flex-1 flex flex-col justify-between border-slate-800">
+                <div>
+                  <h3 className="font-semibold text-lg mb-6">나의 주간 미션 현황판</h3>
+                  
+                  <div className="space-y-8">
+                    <div>
+                      <div className="flex justify-between items-baseline mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-brand-cyan">아침 러닝 (05:00 ~ 09:00)</span>
+                          <span className="text-[10px] bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/20 px-2 py-0.5 rounded">최소 3회</span>
+                        </div>
+                        <span className="font-outfit font-extrabold text-xl text-brand-cyan">{morningRuns} <span className="text-slate-500 text-xs font-normal">/ 3 회</span></span>
+                      </div>
+                      <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${isMorningTargetMet ? 'bg-gradient-to-r from-brand-cyan to-[#00A3FF] shadow-cyan-glow' : 'bg-brand-cyan'}`}
+                          style={{ width: `${Math.min((morningRuns / 3) * 100, 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1 text-[11px] text-slate-500">
+                        <span>주말 포함 일찍 달리기 🏃‍♂️</span>
+                        <span>{isMorningTargetMet ? '🎯 달성 완료!' : `${3 - morningRuns}회 남음`}</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-baseline mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-brand-neon">총 러닝 횟수 (아침 + 저녁)</span>
+                          <span className="text-[10px] bg-brand-neon/15 text-brand-neon border border-brand-neon/20 px-2 py-0.5 rounded">최소 4회</span>
+                        </div>
+                        <span className="font-outfit font-extrabold text-xl text-brand-neon">{totalRuns} <span className="text-slate-500 text-xs font-normal">/ 4 회</span></span>
+                      </div>
+                      <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${isTotalTargetMet ? 'bg-gradient-to-r from-brand-neon to-[#2ECC71] shadow-neon-glow' : 'bg-brand-neon'}`}
+                          style={{ width: `${Math.min((totalRuns / 4) * 100, 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1 text-[11px] text-slate-500">
+                        <span>금요일 낮 12시 전 기록까지 인정</span>
+                        <span>{isTotalTargetMet ? '🎯 달성 완료!' : `${4 - totalRuns}회 남음`}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-800/80 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-400">나의 생존 여부</p>
+                    <h4 className="text-lg font-bold">
+                      {isMorningTargetMet || isTotalTargetMet ? (
+                        <span className="text-brand-neon flex items-center gap-1.5 mt-1">🎉 벌금 면제 완료!</span>
+                      ) : (
+                        <span className="text-brand-orange flex items-center gap-1.5 mt-1">⚠️ 벌금 독박 위험군 (FNR 쏘기 위기)</span>
+                      )}
+                    </h4>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] text-slate-500 block">이번 주 벌금액</span>
+                    <span className="font-outfit text-lg font-extrabold text-brand-red">₩ 50,000 상당 페널티</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Garmin simulation Modal */}
+          {showModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+              <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+                <h3 className="font-extrabold text-xl text-white mb-4 flex items-center gap-2">
+                  <Icon name="activity" className="text-brand-cyan" /> 🔍 가인/스트라바 AI 분석 결과
+                </h3>
+                
+                <div className="space-y-4 mb-6">
+                  <div className="border border-slate-700 bg-slate-800/50 rounded-xl p-4 text-center">
+                    <p className="text-xs text-slate-400 mb-1">업로드된 파일</p>
+                    <p className="font-mono text-sm font-semibold text-brand-cyan truncate">{uploadFile?.name}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시작 시간</label>
+                      <input 
+                        type="time" 
+                        value={runTime} 
+                        onChange={(e) => setRunTime(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5 font-medium">러닝 거리 (km)</label>
+                      <div className="relative">
+                        <input 
+                          type="number" 
+                          step="0.1" 
+                          value={runDistance} 
+                          onChange={(e) => setRunDistance(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                        />
+                        <span className="absolute right-3 top-2 text-xs text-slate-500">km</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5 font-medium">달린 시간 (분)</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        value={runDuration} 
+                        onChange={(e) => setRunDuration(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                      />
+                      <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setShowModal(false)}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-xl text-sm font-semibold transition"
+                  >
+                    취소
+                  </button>
+                  <button 
+                    onClick={submitRunAuth}
+                    className="flex-1 bg-gradient-to-r from-brand-neon to-[#2ECC71] text-brand-black hover:brightness-110 py-2.5 rounded-xl text-sm font-bold transition shadow-neon-glow"
+                  >
+                    인증 성공 등록!
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 2. RaceBoard Component
+    function RaceBoard({ members }) {
+      const sortedMembers = [...members].sort((a, b) => {
+        const aImmunity = a.morningRuns >= 3 || a.totalRuns >= 4;
+        const bImmunity = b.morningRuns >= 3 || b.totalRuns >= 4;
+        if (aImmunity && !bImmunity) return -1;
+        if (!aImmunity && bImmunity) return 1;
+        if (a.totalRuns !== b.totalRuns) {
+          return b.totalRuns - a.totalRuns;
+        }
+        return b.morningRuns - a.morningRuns;
+      });
+
+      return (
+        <div className="glass-panel rounded-2xl p-6 border-slate-800 space-y-8">
+          <div>
+            <h3 className="font-semibold text-lg mb-1">
+              🏃‍♂️ FNR 뒷풀이 쏘기 독박 레이스
+            </h3>
+            <p className="text-sm text-slate-400">
+              달성률이 높을수록 피니시 라인으로 질주합니다. 꼴찌는 금요일 뒷풀이 독박 확정! 💸
+            </p>
+          </div>
+
+          <div className="bg-slate-950/80 rounded-xl p-4 border border-slate-900 relative overflow-hidden">
+            <div className="absolute right-12 top-0 bottom-0 w-1 border-r-2 border-dashed border-brand-neon/40 flex items-center justify-center">
+              <div className="bg-brand-neon/20 text-brand-neon text-[9px] font-bold px-1.5 py-0.5 rounded rotate-90 origin-center whitespace-nowrap tracking-wider">
+                FINISH (면제)
+              </div>
+            </div>
+
+            <div className="space-y-6 my-2">
+              {members.map((member, index) => {
+                const morningProgress = member.morningRuns / 3;
+                const totalProgress = member.totalRuns / 4;
+                const overallProgress = Math.max(morningProgress, totalProgress);
+                const isImmune = member.morningRuns >= 3 || member.totalRuns >= 4;
+                const progressPercent = Math.min(overallProgress * 100, 100);
+                const positionLeft = `calc(${progressPercent}% * 0.8)`;
+
+                return (
+                  <div key={member.id} className="relative h-12 border-b border-slate-900/60 last:border-b-0 flex items-center">
+                    <span className="text-[10px] font-mono text-slate-600 font-bold w-6">LANE {index + 1}</span>
+                    <div className="absolute left-8 right-12 h-1 bg-slate-900 rounded-full top-1/2 transform -translate-y-1/2" />
+                    
+                    <div 
+                      className="absolute flex items-center gap-2 transition-all duration-700 ease-out z-10"
+                      style={{ left: `calc(2rem + ${positionLeft})` }}
+                    >
+                      <div className={`relative flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all ${
+                        isImmune 
+                          ? 'bg-brand-neon/15 border-brand-neon text-brand-neon shadow-neon-glow' 
+                          : progressPercent < 50 
+                            ? 'bg-brand-red/10 border-brand-red/60 text-brand-red animate-danger-pulse' 
+                            : 'bg-brand-cyan/15 border-brand-cyan text-brand-cyan'
+                      }`}>
+                        <span className="text-base select-none">{member.avatar}</span>
+                        {!isImmune && progressPercent < 50 && (
+                          <span className="absolute -top-2 -right-2 bg-brand-red text-white p-0.5 rounded-full text-[8px] animate-bounce">
+                            💣
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="flex flex-col">
+                        <span className={`text-xs font-bold ${member.isMe ? 'text-brand-neon font-black' : 'text-slate-200'}`}>
+                          {member.name} {member.isMe && '(나)'}
+                        </span>
+                        <span className="text-[9px] text-slate-500 font-mono">
+                          AM {member.morningRuns}/3 | TOT {member.totalRuns}/4
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-300 mb-3">⚠️ 실시간 생존 서열 현황</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sortedMembers.map((member, idx) => {
+                const isImmune = member.morningRuns >= 3 || member.totalRuns >= 4;
+                return (
+                  <div 
+                    key={member.id} 
+                    className={`flex items-center justify-between p-3.5 rounded-xl border ${
+                      isImmune 
+                        ? 'bg-brand-neon/5 border-brand-neon/20' 
+                        : 'bg-brand-charcoal/40 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-outfit font-bold text-slate-500 w-4 text-center">#{idx + 1}</span>
+                      <span className="text-xl">{member.avatar}</span>
+                      <div>
+                        <span className="text-sm font-semibold block">
+                          {member.name} {member.isMe && <span className="text-[10px] text-brand-neon bg-brand-neon/15 px-1.5 py-0.2 rounded ml-1">Me</span>}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          아침인증 {member.morningRuns}회 / 총 {member.totalRuns}회
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      {isImmune ? (
+                        <span className="text-xs font-bold text-brand-neon flex items-center gap-1 bg-brand-neon/10 px-2.5 py-1 rounded-full">
+                          🏆 생존 완료
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold text-brand-red flex items-center gap-1 bg-brand-red/10 px-2.5 py-1 rounded-full animate-pulse">
+                          💸 뒷풀이 독박위험
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. HistoryList Component
+    function HistoryList({ histories }) {
+      const [selectedHistory, setSelectedHistory] = useState(null);
+
+      return (
+        <div className="glass-panel rounded-2xl p-6 border-slate-800 space-y-6">
+          <div>
+            <h3 className="font-semibold text-lg mb-1">
+              📸 주간 인증 히스토리 피드
+            </h3>
+            <p className="text-sm text-slate-400">
+              지인들이 인증한 생생한 가민 & 스트라바 캡처 숙제 보관함입니다.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {histories.map((history) => (
+              <div 
+                key={history.id} 
+                className="bg-brand-charcoal border border-slate-800 rounded-xl overflow-hidden hover:border-brand-neon/40 transition group flex flex-col justify-between"
+              >
+                <div className="bg-slate-950 p-6 flex justify-center items-center border-b border-slate-900 relative">
+                  <div className="w-32 h-32 rounded-full border-4 border-slate-700 bg-slate-900 shadow-lg flex flex-col justify-center items-center relative overflow-hidden">
+                    <div className="absolute top-1 text-[7px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
+                    
+                    <span className="text-[9px] text-brand-neon font-bold font-outfit uppercase mt-2">RUNNING</span>
+                    <span className="text-2xl font-extrabold font-outfit text-white leading-none my-1">{history.distance.toFixed(1)}</span>
+                    <span className="text-[8px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
+                    
+                    <div className="flex gap-2.5 mt-2 border-t border-slate-800 pt-1.5 w-4/5 justify-center">
+                      <div className="text-center">
+                        <span className="text-[8px] text-slate-500 block font-mono">TIME</span>
+                        <span className="text-[9px] font-bold text-slate-300 font-mono">{history.duration}m</span>
+                      </div>
+                      <div className="border-r border-slate-800" />
+                      <div className="text-center">
+                        <span className="text-[8px] text-slate-500 block font-mono">PACE</span>
+                        <span className="text-[9px] font-bold text-slate-300 font-mono">5'30"</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <span className="absolute top-3 right-3 bg-brand-neon/15 border border-brand-neon/30 text-brand-neon text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-neon-glow">
+                    🏆 VERIFIED
+                  </span>
+                </div>
+
+                <div className="p-4 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{history.avatar}</span>
+                    <div>
+                      <span className="text-sm font-bold text-white block">{history.name}</span>
+                      <span className="text-[10px] text-slate-400">
+                        {history.isMorning ? (
+                          <span className="text-brand-cyan font-semibold">⚡️ 아침 러닝 성공</span>
+                        ) : (
+                          <span className="text-slate-400">🏃‍♂️ 일반 달리기</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs border-t border-slate-800/60 pt-3">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span>📅 {history.date}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400 justify-end">
+                      <span>⏰ {history.time}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-4 pb-4">
+                  <button 
+                    onClick={() => setSelectedHistory(history)}
+                    className="w-full bg-slate-800 hover:bg-brand-cyan hover:text-brand-black text-slate-300 text-xs font-semibold py-2 rounded-lg transition"
+                  >
+                    🔍 인증 원본 자세히 보기
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {selectedHistory && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+              <div className="glass-panel max-w-lg w-full rounded-2xl p-6 border-slate-700 shadow-2xl relative">
+                <button 
+                  onClick={() => setSelectedHistory(null)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold p-1"
+                >
+                  ✕
+                </button>
+
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="text-3xl">{selectedHistory.avatar}</span>
+                  <div>
+                    <h3 className="font-extrabold text-lg text-white">{selectedHistory.name}의 인증 숙제</h3>
+                    <p className="text-xs text-slate-400">{selectedHistory.date} | {selectedHistory.time} 제출</p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/80 rounded-xl p-8 border border-slate-800 flex flex-col items-center justify-center mb-6">
+                  <div className="w-48 h-48 rounded-full border-8 border-slate-700 bg-slate-900 shadow-2xl flex flex-col justify-center items-center relative">
+                    <div className="absolute top-2 text-[10px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
+                    <span className="text-xs text-brand-neon font-bold font-outfit uppercase mt-3">RUNNING</span>
+                    <span className="text-4xl font-extrabold font-outfit text-white leading-none my-1">{selectedHistory.distance.toFixed(2)}</span>
+                    <span className="text-[9px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
+                    
+                    <div className="flex gap-4 mt-3 border-t border-slate-800 pt-3 w-4/5 justify-center">
+                      <div className="text-center">
+                        <span className="text-[9px] text-slate-500 block font-mono">DURATION</span>
+                        <span className="text-xs font-bold text-slate-300 font-mono">{selectedHistory.duration}m</span>
+                      </div>
+                      <div className="border-r border-slate-800" />
+                      <div className="text-center">
+                        <span className="text-[9px] text-slate-500 block font-mono">PACE</span>
+                        <span className="text-xs font-bold text-slate-300 font-mono">5'18" /km</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 rounded-xl p-4 space-y-2 border border-slate-800 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">운동 인정 상태</span>
+                    <span className="font-semibold text-brand-neon">성공 (30분 이상 / 5km 만족)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">아침 러닝 여부</span>
+                    <span>
+                      {selectedHistory.isMorning ? (
+                        <span className="font-semibold text-brand-cyan">예 (오전 {selectedHistory.time} 활동 시작)</span>
+                      ) : (
+                        <span className="text-slate-400">아니오</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setSelectedHistory(null)}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-sm mt-6 transition"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Supabase Web Client Initialization
+    const supabaseUrl = "https://ryvpnkwneciqplneeffn.supabase.co";
+    const supabaseAnonKey = "sb_publishable_ypDHk0avu7WTfH_kppKabQ_wWqtpQQf";
+    const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+    // 4. Main App Component
+    function App() {
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [members, setMembers] = useState([]);
+      const [histories, setHistories] = useState([]);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        fetchData();
+      }, []);
+
+      const fetchData = async () => {
+        try {
+          setLoading(true);
+          // 1. Fetch members
+          const { data: dbMembers, error: memError } = await supabaseClient
+            .from('members')
+            .select('*')
+            .order('id', { ascending: true });
+          
+          if (memError) throw memError;
+
+          const mappedMembers = dbMembers.map(m => ({
+            id: m.id,
+            name: m.name,
+            avatar: m.avatar,
+            morningRuns: m.morning_runs,
+            totalRuns: m.total_runs,
+            todayCompleted: m.today_completed,
+            lastDistance: Number(m.last_distance),
+            lastDuration: Number(m.last_duration),
+            lastTime: m.last_time,
+            lastRunType: m.last_run_type,
+            isMe: m.is_me
+          }));
+          setMembers(mappedMembers);
+
+          // 2. Fetch runs histories
+          const { data: dbRuns, error: runsError } = await supabaseClient
+            .from('runs')
+            .select('*')
+            .order('id', { ascending: false });
+
+          if (runsError) throw runsError;
+
+          const mappedRuns = dbRuns.map(r => ({
+            id: r.id,
+            name: r.name,
+            avatar: r.avatar,
+            distance: Number(r.distance),
+            duration: Number(r.duration),
+            time: r.time,
+            date: r.date,
+            isMorning: r.is_morning
+          }));
+          setHistories(mappedRuns);
+        } catch (err) {
+          console.error("Data fetch error:", err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const currentUser = members.find(m => m.isMe) || { name: '복케이', avatar: '👑', morningRuns: 0, totalRuns: 0, todayCompleted: false };
+
+      const getPenaltyCandidate = () => {
+        if (members.length === 0) return '아잘 🔥';
+        const sorted = [...members].sort((a, b) => {
+          const aImmunity = a.morningRuns >= 3 || a.totalRuns >= 4;
+          const bImmunity = b.morningRuns >= 3 || b.totalRuns >= 4;
+          if (aImmunity && !bImmunity) return 1;
+          if (!aImmunity && bImmunity) return -1;
+          return a.totalRuns - b.totalRuns;
+        });
+        const candidate = sorted[0];
+        const isImmune = candidate.morningRuns >= 3 || candidate.totalRuns >= 4;
+        return isImmune ? '없음 🎯' : `${candidate.name} ${candidate.avatar}`;
+      };
+
+      const handleUploadSuccess = async (runData) => {
+        try {
+          setLoading(true);
+          // 1. Insert new run into database
+          const { error: runError } = await supabaseClient
+            .from('runs')
+            .insert([{
+              name: currentUser.name,
+              avatar: currentUser.avatar,
+              distance: runData.distance,
+              duration: runData.duration,
+              time: runData.time,
+              date: runData.date,
+              is_morning: runData.isMorning
+            }]);
+
+          if (runError) throw runError;
+
+          // 2. Update member runs count
+          const { error: memberError } = await supabaseClient
+            .from('members')
+            .update({
+              today_completed: true,
+              total_runs: currentUser.totalRuns + 1,
+              morning_runs: runData.isMorning ? currentUser.morningRuns + 1 : currentUser.morningRuns,
+              last_distance: runData.distance,
+              last_duration: runData.duration,
+              last_time: runData.time,
+              last_run_type: runData.isMorning ? 'morning' : 'regular'
+            })
+            .eq('is_me', true);
+
+          if (memberError) throw memberError;
+
+          // Refresh data
+          await fetchData();
+        } catch (err) {
+          console.error("Upload handler error:", err);
+          alert("데이터 전송 중 오류가 발생했습니다.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-brand-black pb-16">
+          <header className="border-b border-slate-900 bg-brand-black/80 backdrop-blur sticky top-0 z-30">
+            <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="bg-gradient-to-tr from-brand-neon to-brand-cyan p-2 rounded-xl text-brand-black shadow-neon-glow">
+                  🏃‍♂️
+                </div>
+                <div>
+                  <span className="font-outfit font-extrabold text-xl tracking-tight text-white flex items-center gap-1.5">
+                    RunSweat <span className="text-[10px] bg-brand-neon/20 text-brand-neon px-2 py-0.5 rounded font-inter">CHALLENGE</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 block -mt-0.5">러닝 숙제 & 벌금 독박 레이스 🏃‍♂️</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
+                  ⚡️ 이번 주 벌금 후보: <strong className="text-brand-red font-semibold font-outfit">{getPenaltyCandidate()}</strong>
+                </span>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-6xl mx-auto px-4 mt-8 space-y-8">
+            <div className="flex border-b border-slate-900">
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'dashboard' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                대시보드
+              </button>
+              <button 
+                onClick={() => setActiveTab('race')}
+                className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'race' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                벌금 레이스 현황
+              </button>
+              <button 
+                onClick={() => setActiveTab('feed')}
+                className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'feed' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                인증 피드
+              </button>
+              <button 
+                onClick={() => setActiveTab('rules')}
+                className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'rules' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                숙제방 규칙
+              </button>
+            </div>
+
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="text-brand-cyan animate-spin text-xl font-bold">⏱ Loading...</div>
+                <p className="text-sm text-slate-400">데이터베이스에서 러닝 숙제 동기화 중...</p>
+              </div>
+            )}
+
+            {!loading && (
+              <div className="transition-all duration-300">
+                {activeTab === 'dashboard' && (
+                  <Dashboard 
+                    currentUser={currentUser} 
+                    onUploadSuccess={handleUploadSuccess} 
+                  />
+                )}
+
+                {activeTab === 'race' && (
+                  <RaceBoard members={members} />
+                )}
+
+                {activeTab === 'feed' && (
+                  <HistoryList histories={histories} />
+                )}
+
+                {activeTab === 'rules' && (
+                  <div className="glass-panel rounded-2xl p-8 border-slate-800 space-y-6">
+                    <h3 className="text-xl font-bold text-white border-b border-slate-800 pb-4">
+                      📄 RunSweat 숙제방 챌린지 규칙 시스템
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <h4 className="font-semibold text-brand-neon">🏃‍♂️ 운동 인정 기준</h4>
+                        <ul className="list-inside list-disc text-sm text-slate-300 space-y-2">
+                          <li>거리 **5.0km 이상** 또는 시간 **30분 이상** 달리기 충족 시 인정.</li>
+                          <li>하루 최대 **1회**만 인정됩니다.</li>
+                          <li>가민, 스트라바 캡처 이미지 업로드를 통한 증빙 필요.</li>
+                        </ul>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h4 className="font-semibold text-brand-cyan">⏰ 아침/주간 조건 (자동 판정)</h4>
+                        <ul className="list-inside list-disc text-sm text-slate-300 space-y-2">
+                          <li>**아침 러닝 시간대**: [오전 5시 ~ 오전 9시] 사이 활동 시작 기록.</li>
+                          <li>**주간 최소 달성 조건** (택1):
+                            <span className="block pl-5 mt-1 text-slate-400">• 아침 러닝 3회 이상 달성</span>
+                            <span className="block pl-5 text-slate-400">• 아침+저녁 포함 총 4회 이상 달성</span>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h4 className="font-semibold text-slate-300">📅 집계 기간</h4>
+                        <ul className="list-inside list-disc text-sm text-slate-300 space-y-2">
+                          <li>**매주 토요일 00:00부터 금요일 12:00 (정오)**까지 집계 마감.</li>
+                          <li>금요일 저녁 단체 러닝 기록은 집계 대상에서 제외됩니다.</li>
+                        </ul>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h4 className="font-semibold text-brand-red">💸 페널티 및 벌금</h4>
+                        <ul className="list-inside list-disc text-sm text-slate-300 space-y-2">
+                          <li>금요일 낮 12시 기준 주간 조건을 충족하지 못할 시 페널티 부여.</li>
+                          <li>페널티: **FNR (Friday Night Run) 뒷풀이 회식 비용 전액 쏘기!** 🍻</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

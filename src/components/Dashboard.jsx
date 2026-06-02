@@ -1,0 +1,380 @@
+import React, { useState, useEffect } from 'react';
+import { Upload, Timer, CheckCircle, AlertTriangle, HelpCircle, Activity } from 'lucide-react';
+
+export default function Dashboard({ currentUser, onUploadSuccess }) {
+  const [dragActive, setDragActive] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [runTime, setRunTime] = useState("07:30"); // Default morning run
+  const [runDistance, setRunDistance] = useState("5.2"); // Default valid distance
+  const [runDuration, setRunDuration] = useState("35"); // Default valid duration
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isUrgent, setIsUrgent] = useState(false);
+
+  // Countdown timer calculation to next Friday 12:00 PM (Noon)
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = new Date();
+      const currentDay = now.getDay(); // 0 is Sunday, 5 is Friday, 6 is Saturday
+      
+      // Target is this week's Friday at 12:00:00 (Noon)
+      let target = new Date();
+      target.setHours(12, 0, 0, 0);
+
+      // Adjust to next Friday if today is Friday afternoon or Saturday
+      let daysUntilFriday = 5 - currentDay;
+      if (daysUntilFriday < 0 || (daysUntilFriday === 0 && now.getHours() >= 12)) {
+        daysUntilFriday += 7;
+      }
+      
+      target.setDate(now.getDate() + daysUntilFriday);
+      
+      const difference = target.getTime() - now.getTime();
+      
+      if (difference <= 0) {
+        return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+      }
+
+      // Check if remaining time is less than 24 hours
+      if (difference < 24 * 60 * 60 * 1000) {
+        setIsUrgent(true);
+      } else {
+        setIsUrgent(false);
+      }
+
+      return {
+        days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((difference / 1000 / 60) % 60),
+        seconds: Math.floor((difference / 1000) % 60)
+      };
+    };
+
+    const timer = setInterval(() => {
+      setTimeLeft(calculateTimeLeft());
+    }, 1000);
+
+    setTimeLeft(calculateTimeLeft());
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setUploadFile(e.dataTransfer.files[0]);
+      setShowModal(true);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    e.preventDefault();
+    if (e.target.files && e.target.files[0]) {
+      setUploadFile(e.target.files[0]);
+      setShowModal(true);
+    }
+  };
+
+  const submitRunAuth = () => {
+    // Run Validation Rules
+    const distance = parseFloat(runDistance);
+    const duration = parseFloat(runDuration);
+    const hour = parseInt(runTime.split(":")[0]);
+    
+    // Rule 1: 30 mins or 5km
+    const isValidDistanceOrTime = distance >= 5.0 || duration >= 30;
+    
+    // Rule 2: Morning definition (05:00 - 09:00)
+    const isMorning = hour >= 5 && hour < 9;
+
+    if (!isValidDistanceOrTime) {
+      alert("❌ 운동 불인정! 5km 이상 또는 30분 이상 달리기 기준을 만족해야 합니다.");
+      return;
+    }
+
+    onUploadSuccess({
+      distance,
+      duration,
+      time: runTime,
+      isMorning,
+      date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' })
+    });
+
+    setShowModal(false);
+    setUploadFile(null);
+  };
+
+  // Target values
+  const morningRuns = currentUser.morningRuns;
+  const totalRuns = currentUser.totalRuns;
+  const isMorningTargetMet = morningRuns >= 3;
+  const isTotalTargetMet = totalRuns >= 4;
+
+  return (
+    <div className="space-y-8">
+      {/* 마감 카운트다운 타이머 */}
+      <div className={`glass-panel rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between transition-all duration-300 ${isUrgent ? 'border-brand-red/50 shadow-red-glow' : 'border-slate-800'}`}>
+        <div className="flex items-center gap-4 mb-4 md:mb-0">
+          <div className={`p-3 rounded-full ${isUrgent ? 'bg-brand-red/20 text-brand-red animate-pulse' : 'bg-brand-neon/10 text-brand-neon'}`}>
+            <Timer size={28} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-300">주간 숙제 집계 마감까지</h2>
+            <p className="text-xs text-slate-400">매주 토요일 00:00 ~ 금요일 12:00 AM (저녁 러닝 제외)</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 font-outfit">
+          <div className="flex flex-col items-center">
+            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.days).padStart(2, '0')}</span>
+            <span className="text-[10px] text-slate-400 mt-1 uppercase">Days</span>
+          </div>
+          <span className="text-xl text-slate-500 font-bold">:</span>
+          <div className="flex flex-col items-center">
+            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.hours).padStart(2, '0')}</span>
+            <span className="text-[10px] text-slate-400 mt-1 uppercase">Hours</span>
+          </div>
+          <span className="text-xl text-slate-500 font-bold">:</span>
+          <div className="flex flex-col items-center">
+            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.minutes).padStart(2, '0')}</span>
+            <span className="text-[10px] text-slate-400 mt-1 uppercase">Min</span>
+          </div>
+          <span className="text-xl text-slate-500 font-bold">:</span>
+          <div className="flex flex-col items-center">
+            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red animate-pulse' : 'text-brand-cyan'}`}>{String(timeLeft.seconds).padStart(2, '0')}</span>
+            <span className="text-[10px] text-slate-400 mt-1 uppercase">Sec</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 2단 구성: 인증 및 달성도 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* 오늘 인증 업로드 카드 */}
+        <div className="lg:col-span-5 flex flex-col">
+          <div className="glass-panel rounded-2xl p-6 flex-1 flex flex-col justify-between border-slate-800">
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-lg">오늘의 러닝 숙제 인증</h3>
+                <span className="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full font-medium">1일 최대 1회</span>
+              </div>
+              <p className="text-sm text-slate-400 mb-6">
+                가민, 스트라바 등 러닝 기록 캡처 이미지를 올려주세요. <br />
+                자동 판정을 통해 숙제 달성 여부를 결정합니다.
+              </p>
+            </div>
+
+            {currentUser.todayCompleted ? (
+              <div className="border border-brand-neon/40 bg-brand-neon/5 rounded-xl p-8 flex flex-col items-center justify-center text-center animate-neon-pulse">
+                <CheckCircle size={56} className="text-brand-neon mb-3" />
+                <h4 className="text-lg font-bold text-white mb-1">오늘 숙제 제출 완료!</h4>
+                <p className="text-xs text-brand-neon font-medium font-outfit mb-3">{currentUser.lastRunType === 'morning' ? '⚡️ 아침 러닝 인정 (5AM-9AM)' : '🏃‍♂️ 일반 러닝 인정'}</p>
+                <div className="bg-brand-charcoal text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700">
+                  {currentUser.lastDistance}km / {currentUser.lastDuration}분 / {currentUser.lastTime}인증
+                </div>
+              </div>
+            ) : (
+              <div 
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center transition-all cursor-pointer ${
+                  dragActive 
+                    ? 'border-brand-cyan bg-brand-cyan/5 shadow-cyan-glow scale-[1.01]' 
+                    : 'border-slate-700 bg-brand-charcoal hover:border-slate-500'
+                }`}
+                onClick={() => document.getElementById("file-upload").click()}
+              >
+                <input 
+                  id="file-upload" 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  onChange={handleFileChange}
+                />
+                <div className="p-4 rounded-full bg-slate-800 text-slate-400 mb-4 group-hover:scale-110 transition-transform">
+                  <Upload size={32} />
+                </div>
+                <p className="font-semibold text-sm mb-1 text-slate-200">러닝 기록 스크린샷 드롭 또는 클릭</p>
+                <p className="text-xs text-slate-500">Strava, Garmin, Nike Run Club 등</p>
+              </div>
+            )}
+
+            <div className="mt-6 bg-slate-900/50 rounded-xl p-4 border border-slate-800 text-xs space-y-2">
+              <div className="flex gap-2 text-slate-300">
+                <Activity size={14} className="text-brand-cyan shrink-0 mt-0.5" />
+                <span>**운동 인정 기준**: 5km 이상 달리기 또는 30분 이상 달리기 완료 시 1회 인정</span>
+              </div>
+              <div className="flex gap-2 text-slate-300">
+                <AlertTriangle size={14} className="text-brand-orange shrink-0 mt-0.5" />
+                <span>**아침 러닝 인정**: [오전 5시 ~ 오전 9시] 사이 활동 시작 기록 기준</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 주간 목표 달성도 카드 */}
+        <div className="lg:col-span-7 flex flex-col">
+          <div className="glass-panel rounded-2xl p-6 flex-1 flex flex-col justify-between border-slate-800">
+            <div>
+              <h3 className="font-semibold text-lg mb-6">나의 주간 미션 현황판</h3>
+              
+              <div className="space-y-8">
+                {/* 아침 러닝 미션 */}
+                <div>
+                  <div className="flex justify-between items-baseline mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-brand-cyan">아침 러닝 (05:00 ~ 09:00)</span>
+                      <span className="text-[10px] bg-brand-cyan/15 text-brand-cyan border border-brand-cyan/20 px-2 py-0.5 rounded">최소 3회</span>
+                    </div>
+                    <span className="font-outfit font-extrabold text-xl text-brand-cyan">{morningRuns} <span className="text-slate-500 text-xs font-normal">/ 3 회</span></span>
+                  </div>
+                  <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${isMorningTargetMet ? 'bg-gradient-to-r from-brand-cyan to-[#00A3FF] shadow-cyan-glow' : 'bg-brand-cyan'}`}
+                      style={{ width: `${Math.min((morningRuns / 3) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1 text-[11px] text-slate-500">
+                    <span>주말 포함 일찍 달리기 🏃‍♂️</span>
+                    <span>{isMorningTargetMet ? '🎯 달성 완료!' : `${3 - morningRuns}회 남음`}</span>
+                  </div>
+                </div>
+
+                {/* 총 러닝 미션 */}
+                <div>
+                  <div className="flex justify-between items-baseline mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-brand-neon">총 러닝 횟수 (아침 + 저녁)</span>
+                      <span className="text-[10px] bg-brand-neon/15 text-brand-neon border border-brand-neon/20 px-2 py-0.5 rounded">최소 4회</span>
+                    </div>
+                    <span className="font-outfit font-extrabold text-xl text-brand-neon">{totalRuns} <span className="text-slate-500 text-xs font-normal">/ 4 회</span></span>
+                  </div>
+                  <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${isTotalTargetMet ? 'bg-gradient-to-r from-brand-neon to-[#2ECC71] shadow-neon-glow' : 'bg-brand-neon'}`}
+                      style={{ width: `${Math.min((totalRuns / 4) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1 text-[11px] text-slate-500">
+                    <span>금요일 낮 12시 전 기록까지 인정</span>
+                    <span>{isTotalTargetMet ? '🎯 달성 완료!' : `${4 - totalRuns}회 남음`}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 최종 상태 서머리 */}
+            <div className="mt-8 pt-6 border-t border-slate-800/80 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400">나의 생존 여부</p>
+                <h4 className="text-lg font-bold">
+                  {isMorningTargetMet || isTotalTargetMet ? (
+                    <span className="text-brand-neon flex items-center gap-1.5 mt-1">🎉 벌금 면제 완료!</span>
+                  ) : (
+                    <span className="text-brand-orange flex items-center gap-1.5 mt-1">⚠️ 벌금 독박 위험군 (FNR 쏘기 위기)</span>
+                  )}
+                </h4>
+              </div>
+              <div className="text-right">
+                <span className="text-[11px] text-slate-500 block">이번 주 벌금액</span>
+                <span className="font-outfit text-lg font-extrabold text-brand-red">₩ 50,000 상당 페널티</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 인증 분석 수동 확인 모달 */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+            <h3 className="font-extrabold text-xl text-white mb-4 flex items-center gap-2">
+              <Activity className="text-brand-cyan" /> 🔍 가인/스트라바 AI 분석 결과
+            </h3>
+            
+            <div className="space-y-4 mb-6">
+              <div className="border border-slate-700 bg-slate-800/50 rounded-xl p-4 text-center">
+                <p className="text-xs text-slate-400 mb-1">업로드된 파일</p>
+                <p className="font-mono text-sm font-semibold text-brand-cyan truncate">{uploadFile?.name}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시작 시간 (Hour)</label>
+                  <input 
+                    type="time" 
+                    value={runTime} 
+                    onChange={(e) => setRunTime(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">오전 5시 ~ 9시: 아침인정</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">러닝 거리 (km)</label>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      value={runDistance} 
+                      onChange={(e) => setRunDistance(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                    />
+                    <span className="absolute right-3 top-2 text-xs text-slate-500">km</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1.5 font-medium">달린 시간 (분)</label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    value={runDuration} 
+                    onChange={(e) => setRunDuration(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                  />
+                  <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/50 rounded-xl p-3 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <span className="block font-semibold text-slate-300">💡 시뮬레이션 규칙 힌트:</span>
+                <span>• 거리 5km 이상 혹은 30분 이상일 때 숙제로 인정됩니다.</span>
+                <span>• 아침 러닝 조건으로 업로드 시 아침 카운트와 총 카운트가 함께 1씩 증가합니다.</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowModal(false)}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-xl text-sm font-semibold transition"
+              >
+                취소
+              </button>
+              <button 
+                onClick={submitRunAuth}
+                className="flex-1 bg-gradient-to-r from-brand-neon to-[#2ECC71] text-brand-black hover:brightness-110 py-2.5 rounded-xl text-sm font-bold transition shadow-neon-glow"
+              >
+                인증 성공 등록!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
