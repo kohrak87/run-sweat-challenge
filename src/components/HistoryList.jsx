@@ -271,9 +271,75 @@ export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLo
                       </div>
                     </div>
                   )}
-              >
-                닫기
-              </button>
+                </div>
+
+                <div className="bg-slate-900 rounded-xl p-4 space-y-2 border border-slate-800 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">운동 인정 상태</span>
+                    <span className="font-semibold text-brand-neon">성공 (30분 이상 / 5km 만족)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">아침 러닝 여부</span>
+                    <span>
+                      {selectedHistory.isMorning ? (
+                        <span className="font-semibold text-brand-cyan">예 ({selectedHistory.time} 러닝)</span>
+                      ) : (
+                        <span className="text-slate-400">아니오 ({selectedHistory.time} 러닝)</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">인증 데이터</span>
+                    <span className="text-slate-200">{selectedHistory.distance}km / {selectedHistory.duration}분 / {selectedHistory.time} 인증</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Footer Buttons */}
+            <div className="flex flex-col sm:flex-row gap-2 mt-6">
+              {isEditing ? (
+                <>
+                  <button 
+                    onClick={handleSaveEdit}
+                    className="flex-1 bg-gradient-to-r from-brand-neon to-[#2ECC71] text-brand-black hover:brightness-110 py-3 rounded-xl text-xs font-bold transition shadow-neon-glow"
+                  >
+                    💾 변경사항 저장
+                  </button>
+                  <button 
+                    onClick={() => setIsEditing(false)}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"
+                  >
+                    취소
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button 
+                    onClick={() => setIsEditing(true)}
+                    className="flex-1 bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/35 text-brand-cyan py-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-cyan-glow"
+                  >
+                    ✏️ 이 인증 수정하기
+                  </button>
+                  <button 
+                    onClick={() => {
+                      if (onDeleteRun) {
+                        onDeleteRun(selectedHistory.id);
+                        setSelectedHistory(null);
+                      }
+                    }}
+                    className="flex-1 bg-brand-red/10 hover:bg-brand-red/20 border border-brand-red/30 text-brand-red py-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                  >
+                    🗑️ 이 인증 삭제하기
+                  </button>
+                  <button 
+                    onClick={() => setSelectedHistory(null)}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"
+                  >
+                    닫기
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
