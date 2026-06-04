@@ -113,7 +113,7 @@
       const [dragActive, setDragActive] = useState(false);
       const [showModal, setShowModal] = useState(false);
       const [uploadFile, setUploadFile] = useState(null);
-      const [runTime, setRunTime] = useState("07:30");
+      const [timeOfDay, setTimeOfDay] = useState("morning");
       const [runDistance, setRunDistance] = useState("5.2");
       const [runDuration, setRunDuration] = useState("35");
       const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -188,17 +188,45 @@
         }
       };
 
-      const submitRunAuth = () => {
+      const compressImage = (file) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 400;
+              const scaleSize = MAX_WIDTH / img.width;
+              canvas.width = MAX_WIDTH;
+              canvas.height = img.height * scaleSize;
+
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+              resolve(dataUrl);
+            };
+          };
+        });
+      };
+
+      const submitRunAuth = async () => {
         const distance = parseFloat(runDistance);
         const duration = parseFloat(runDuration);
-        const hour = parseInt(runTime.split(":")[0]);
         
         const isValidDistanceOrTime = distance >= 5.0 || duration >= 30;
-        const isMorning = hour >= 5 && hour < 9;
+        const isMorning = timeOfDay === 'morning';
+        const runTime = isMorning ? "오전" : "오후";
 
         if (!isValidDistanceOrTime) {
           alert("❌ 운동 불인정! 5km 이상 또는 30분 이상 달리기 기준을 만족해야 합니다.");
           return;
+        }
+
+        let imageUrl = null;
+        if (uploadFile) {
+          imageUrl = await compressImage(uploadFile);
         }
 
         onUploadSuccess({
@@ -206,7 +234,8 @@
           duration,
           time: runTime,
           isMorning,
-          date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' })
+          date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' }),
+          imageUrl
         });
 
         setShowModal(false);
@@ -403,13 +432,31 @@
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시작 시간</label>
-                      <input 
-                        type="time" 
-                        value={runTime} 
-                        onChange={(e) => setRunTime(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"
-                      />
+                      <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시간대</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setTimeOfDay('morning')}
+                          className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                            timeOfDay === 'morning'
+                              ? 'bg-brand-cyan/15 border-brand-cyan text-brand-cyan shadow-cyan-glow'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          오전 🌅
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTimeOfDay('afternoon')}
+                          className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                            timeOfDay === 'afternoon'
+                              ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          오후 🌃
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-xs text-slate-400 mb-1.5 font-medium">러닝 거리 (km)</label>
@@ -462,7 +509,7 @@
     }
 
     // 2. RaceBoard Component
-    function RaceBoard({ members }) {
+    function RaceBoard({ members, currentUserId }) {
       const sortedMembers = [...members].sort((a, b) => {
         const aImmunity = a.morningRuns >= 3 || a.totalRuns >= 4;
         const bImmunity = b.morningRuns >= 3 || b.totalRuns >= 4;
@@ -526,8 +573,8 @@
                       </div>
                       
                       <div className="flex flex-col">
-                        <span className={`text-xs font-bold ${member.isMe ? 'text-brand-neon font-black' : 'text-slate-200'}`}>
-                          {member.name} {member.isMe && '(나)'}
+                        <span className={`text-xs font-bold ${member.id === currentUserId ? 'text-brand-neon font-black' : 'text-slate-200'}`}>
+                          {member.name} {member.id === currentUserId && '(나)'}
                         </span>
                         <span className="text-[9px] text-slate-500 font-mono">
                           AM {member.morningRuns}/3 | TOT {member.totalRuns}/4
@@ -559,7 +606,7 @@
                       <span className="text-xl">{member.avatar}</span>
                       <div>
                         <span className="text-sm font-semibold block">
-                          {member.name} {member.isMe && <span className="text-[10px] text-brand-neon bg-brand-neon/15 px-1.5 py-0.2 rounded ml-1">Me</span>}
+                          {member.name} {member.id === currentUserId && <span className="text-[10px] text-brand-neon bg-brand-neon/15 px-1.5 py-0.2 rounded ml-1">Me</span>}
                         </span>
                         <span className="text-[10px] text-slate-400">
                           아침인증 {member.morningRuns}회 / 총 {member.totalRuns}회
@@ -588,8 +635,53 @@
     }
 
     // 3. HistoryList Component
-    function HistoryList({ histories }) {
+    function HistoryList({ histories, onDeleteRun, onEditRun, auditLogs }) {
       const [selectedHistory, setSelectedHistory] = useState(null);
+      const [isEditing, setIsEditing] = useState(false);
+      const [editDistance, setEditDistance] = useState('');
+      const [editDuration, setEditDuration] = useState('');
+      const [editTime, setEditTime] = useState('오전');
+      const [editIsMorning, setEditIsMorning] = useState(true);
+      const [editDate, setEditDate] = useState('');
+
+      const handleOpenDetail = (history) => {
+        setSelectedHistory(history);
+        setIsEditing(false);
+        setEditDistance(history.distance.toString());
+        setEditDuration(history.duration.toString());
+        setEditTime(history.time || (history.isMorning ? '오전' : '오후'));
+        setEditIsMorning(history.isMorning);
+        setEditDate(history.date);
+      };
+
+      const handleSaveEdit = () => {
+        const dist = parseFloat(editDistance);
+        const dur = parseFloat(editDuration);
+        if (isNaN(dist) || isNaN(dur)) {
+          alert("거리와 시간은 숫자로 입력하셔야 합니다!");
+          return;
+        }
+        if (dist < 5.0 && dur < 30) {
+          alert("❌ 운동 불인정! 5km 이상 또는 30분 이상 달리기 기준을 만족해야 합니다.");
+          return;
+        }
+        if (!editDate.trim()) {
+          alert("날짜를 입력해주세요!");
+          return;
+        }
+
+        if (onEditRun) {
+          onEditRun(selectedHistory.id, {
+            distance: dist,
+            duration: dur,
+            time: editTime,
+            isMorning: editIsMorning,
+            date: editDate.trim()
+          });
+        }
+        setSelectedHistory(null);
+        setIsEditing(false);
+      };
 
       return (
         <div className="glass-panel rounded-2xl p-6 border-slate-800 space-y-6">
@@ -608,28 +700,37 @@
                 key={history.id} 
                 className="bg-brand-charcoal border border-slate-800 rounded-xl overflow-hidden hover:border-brand-neon/40 transition group flex flex-col justify-between"
               >
-                <div className="bg-slate-950 p-6 flex justify-center items-center border-b border-slate-900 relative">
-                  <div className="w-32 h-32 rounded-full border-4 border-slate-700 bg-slate-900 shadow-lg flex flex-col justify-center items-center relative overflow-hidden">
-                    <div className="absolute top-1 text-[7px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
-                    
-                    <span className="text-[9px] text-brand-neon font-bold font-outfit uppercase mt-2">RUNNING</span>
-                    <span className="text-2xl font-extrabold font-outfit text-white leading-none my-1">{history.distance.toFixed(1)}</span>
-                    <span className="text-[8px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
-                    
-                    <div className="flex gap-2.5 mt-2 border-t border-slate-800 pt-1.5 w-4/5 justify-center">
-                      <div className="text-center">
-                        <span className="text-[8px] text-slate-500 block font-mono">TIME</span>
-                        <span className="text-[9px] font-bold text-slate-300 font-mono">{history.duration}m</span>
-                      </div>
-                      <div className="border-r border-slate-800" />
-                      <div className="text-center">
-                        <span className="text-[8px] text-slate-500 block font-mono">PACE</span>
-                        <span className="text-[9px] font-bold text-slate-300 font-mono">5'30"</span>
+                <div className="bg-slate-950 h-48 flex justify-center items-center border-b border-slate-900 relative overflow-hidden">
+                  {history.imageUrl ? (
+                    <img 
+                      src={history.imageUrl} 
+                      alt="Garmin Sync Screenshot" 
+                      className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                    />
+                  ) : (
+                    <div className="w-32 h-32 rounded-full border-4 border-slate-700 bg-slate-900 shadow-lg flex flex-col justify-center items-center relative overflow-hidden">
+                      <div className="absolute inset-1 rounded-full border border-slate-800" />
+                      <div className="absolute top-1 text-[7px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
+                      
+                      <span className="text-[9px] text-brand-neon font-bold font-outfit uppercase mt-2">RUNNING</span>
+                      <span className="text-2xl font-extrabold font-outfit text-white leading-none my-1">{history.distance.toFixed(1)}</span>
+                      <span className="text-[8px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
+                      
+                      <div className="flex gap-2.5 mt-2 border-t border-slate-800 pt-1.5 w-4/5 justify-center">
+                        <div className="text-center">
+                          <span className="text-[8px] text-slate-500 block font-mono">TIME</span>
+                          <span className="text-[9px] font-bold text-slate-300 font-mono">{history.duration}m</span>
+                        </div>
+                        <div className="border-r border-slate-800" />
+                        <div className="text-center">
+                          <span className="text-[8px] text-slate-500 block font-mono">PACE</span>
+                          <span className="text-[9px] font-bold text-slate-300 font-mono">5'30"</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
-                  <span className="absolute top-3 right-3 bg-brand-neon/15 border border-brand-neon/30 text-brand-neon text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-neon-glow">
+                  <span className="absolute top-3 right-3 bg-brand-neon/20 border border-brand-neon/30 text-brand-neon text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shadow-neon-glow">
                     🏆 VERIFIED
                   </span>
                 </div>
@@ -661,7 +762,7 @@
 
                 <div className="px-4 pb-4">
                   <button 
-                    onClick={() => setSelectedHistory(history)}
+                    onClick={() => handleOpenDetail(history)}
                     className="w-full bg-slate-800 hover:bg-brand-cyan hover:text-brand-black text-slate-300 text-xs font-semibold py-2 rounded-lg transition"
                   >
                     🔍 인증 원본 자세히 보기
@@ -689,53 +790,211 @@
                   </div>
                 </div>
 
-                <div className="bg-slate-950/80 rounded-xl p-8 border border-slate-800 flex flex-col items-center justify-center mb-6">
-                  <div className="w-48 h-48 rounded-full border-8 border-slate-700 bg-slate-900 shadow-2xl flex flex-col justify-center items-center relative">
-                    <div className="absolute top-2 text-[10px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
-                    <span className="text-xs text-brand-neon font-bold font-outfit uppercase mt-3">RUNNING</span>
-                    <span className="text-4xl font-extrabold font-outfit text-white leading-none my-1">{selectedHistory.distance.toFixed(2)}</span>
-                    <span className="text-[9px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
-                    
-                    <div className="flex gap-4 mt-3 border-t border-slate-800 pt-3 w-4/5 justify-center">
-                      <div className="text-center">
-                        <span className="text-[9px] text-slate-500 block font-mono">DURATION</span>
-                        <span className="text-xs font-bold text-slate-300 font-mono">{selectedHistory.duration}m</span>
+                {isEditing ? (
+                  <div className="space-y-4 mb-6 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <h4 className="text-sm font-bold text-brand-cyan mb-2">✏️ 인증 정보 수정</h4>
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1 font-semibold">활동 날짜</label>
+                      <input
+                        type="text"
+                        value={editDate}
+                        onChange={(e) => setEditDate(e.target.value)}
+                        placeholder="예: 6월 4일 (목)"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 px-3 text-xs text-white focus:border-brand-cyan focus:outline-none font-medium"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] text-slate-500 mb-1 font-semibold">러닝 거리 (km)</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={editDistance}
+                            onChange={(e) => setEditDistance(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 px-3 text-xs text-white focus:border-brand-cyan focus:outline-none pr-8 font-medium font-mono"
+                          />
+                          <span className="absolute right-3 top-2 text-[10px] text-slate-500 font-mono">km</span>
+                        </div>
                       </div>
-                      <div className="border-r border-slate-800" />
-                      <div className="text-center">
-                        <span className="text-[9px] text-slate-500 block font-mono">PACE</span>
-                        <span className="text-xs font-bold text-slate-300 font-mono">5'18" /km</span>
+                      <div>
+                        <label className="block text-[11px] text-slate-500 mb-1 font-semibold">달린 시간 (분)</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            value={editDuration}
+                            onChange={(e) => setEditDuration(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 px-3 text-xs text-white focus:border-brand-cyan focus:outline-none pr-8 font-medium font-mono"
+                          />
+                          <span className="absolute right-3 top-2 text-[10px] text-slate-500 font-mono">분</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-1.5 font-semibold">활동 시간대</label>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditIsMorning(true);
+                            setEditTime('오전');
+                          }}
+                          className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                            editIsMorning
+                              ? 'bg-brand-cyan/15 border-brand-cyan text-brand-cyan shadow-cyan-glow'
+                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'
+                          }`}
+                        >
+                          오전 🌅
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditIsMorning(false);
+                            setEditTime('오후');
+                          }}
+                          className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                            !editIsMorning
+                              ? 'bg-brand-cyan/15 border-brand-cyan text-brand-cyan shadow-cyan-glow'
+                              : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-700'
+                          }`}
+                        >
+                          오후 🌃
+                        </button>
                       </div>
                     </div>
                   </div>
-                </div>
-
-                <div className="bg-slate-900 rounded-xl p-4 space-y-2 border border-slate-800 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">운동 인정 상태</span>
-                    <span className="font-semibold text-brand-neon">성공 (30분 이상 / 5km 만족)</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">아침 러닝 여부</span>
-                    <span>
-                      {selectedHistory.isMorning ? (
-                        <span className="font-semibold text-brand-cyan">예 (오전 {selectedHistory.time} 활동 시작)</span>
+                ) : (
+                  <>
+                    <div className="bg-slate-950/80 rounded-xl border border-slate-800 flex flex-col items-center justify-center mb-6 overflow-hidden w-full">
+                      {selectedHistory.imageUrl ? (
+                        <div className="w-full h-64 overflow-hidden relative bg-slate-950 flex justify-center items-center">
+                          <img 
+                            src={selectedHistory.imageUrl} 
+                            alt="Garmin Sync Detail" 
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
                       ) : (
-                        <span className="text-slate-400">아니오</span>
+                        <div className="p-8 flex justify-center items-center w-full">
+                          <div className="w-48 h-48 rounded-full border-8 border-slate-700 bg-slate-900 shadow-2xl flex flex-col justify-center items-center relative">
+                            <div className="absolute top-2 text-[10px] text-slate-500 font-bold font-mono tracking-widest">GARMIN</div>
+                            <span className="text-xs text-brand-neon font-bold font-outfit uppercase mt-3">RUNNING</span>
+                            <span className="text-4xl font-extrabold font-outfit text-white leading-none my-1">{selectedHistory.distance.toFixed(2)}</span>
+                            <span className="text-[9px] text-slate-400 font-medium uppercase font-outfit">KILOMETERS</span>
+                            
+                            <div className="flex gap-4 mt-3 border-t border-slate-800 pt-3 w-4/5 justify-center">
+                              <div className="text-center">
+                                <span className="text-[9px] text-slate-500 block font-mono">DURATION</span>
+                                <span className="text-xs font-bold text-slate-300 font-mono">{selectedHistory.duration}m</span>
+                              </div>
+                              <div className="border-r border-slate-800" />
+                              <div className="text-center">
+                                <span className="text-[9px] text-slate-500 block font-mono">PACE</span>
+                                <span className="text-xs font-bold text-slate-300 font-mono">5'18" /km</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
-                    </span>
-                  </div>
-                </div>
+                    </div>
 
-                <button 
-                  onClick={() => setSelectedHistory(null)}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-sm mt-6 transition"
-                >
-                  닫기
-                </button>
+                    <div className="bg-slate-900 rounded-xl p-4 space-y-2 border border-slate-800 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">운동 인정 상태</span>
+                        <span className="font-semibold text-brand-neon">성공 (30분 이상 / 5km 만족)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">아침 러닝 여부</span>
+                        <span>
+                          {selectedHistory.isMorning ? (
+                            <span className="font-semibold text-brand-cyan">예 ({selectedHistory.time} 러닝)</span>
+                          ) : (
+                            <span className="text-slate-400">아니오 ({selectedHistory.time} 러닝)</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">인증 데이터</span>
+                        <span className="text-slate-200">{selectedHistory.distance}km / {selectedHistory.duration}분 / {selectedHistory.time} 인증</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2 mt-6">
+                  {isEditing ? (
+                    <>
+                      <button 
+                        onClick={handleSaveEdit}
+                        className="flex-1 bg-gradient-to-r from-brand-neon to-[#2ECC71] text-brand-black hover:brightness-110 py-3 rounded-xl text-xs font-bold transition shadow-neon-glow"
+                      >
+                        💾 변경사항 저장
+                      </button>
+                      <button 
+                        onClick={() => setIsEditing(false)}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"
+                      >
+                        취소
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={() => setIsEditing(true)}
+                        className="flex-1 bg-brand-cyan/10 hover:bg-brand-cyan/20 border border-brand-cyan/35 text-brand-cyan py-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-cyan-glow"
+                      >
+                        ✏️ 이 인증 수정하기
+                      </button>
+                      <button 
+                        onClick={() => {
+                          if (onDeleteRun) {
+                            onDeleteRun(selectedHistory.id);
+                            setSelectedHistory(null);
+                          }
+                        }}
+                        className="flex-1 bg-brand-red/10 hover:bg-brand-red/20 border border-brand-red/30 text-brand-red py-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                      >
+                        🗑️ 이 인증 삭제하기
+                      </button>
+                      <button 
+                        onClick={() => setSelectedHistory(null)}
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"
+                      >
+                        닫기
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}
+
+          {/* 수정 및 삭제 내역 감사 로그 패널 */}
+          <div className="border-t border-slate-900 pt-6 mt-8">
+            <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-900">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5 font-outfit">
+                🛡️ 실시간 수정 및 삭제 내역 (수정내역)
+              </h4>
+              <div className="space-y-2">
+                {auditLogs && auditLogs.length > 0 ? (
+                  auditLogs.slice(0, 5).map((log) => (
+                    <div key={log.id} className="text-[11px] text-slate-300 font-mono flex items-start gap-2 border-b border-slate-900/60 pb-2 last:border-0 last:pb-0">
+                      <span className={`shrink-0 font-bold px-1.5 py-0.2 rounded text-[9px] ${log.actionType === 'DELETE' ? 'bg-brand-red/10 text-brand-red' : 'bg-brand-orange/10 text-brand-orange'}`}>
+                        {log.actionType}
+                      </span>
+                      <span className="flex-1 text-slate-300">{log.details}</span>
+                      <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                        {new Date(log.createdAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })} {new Date(log.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500 italic py-1">최근 수정 및 삭제 내역이 없습니다.</p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -750,11 +1009,26 @@
       const [activeTab, setActiveTab] = useState('dashboard');
       const [members, setMembers] = useState([]);
       const [histories, setHistories] = useState([]);
+      const [auditLogs, setAuditLogs] = useState([]);
       const [loading, setLoading] = useState(true);
+      const [currentUserId, setCurrentUserId] = useState(() => {
+        const saved = localStorage.getItem('run_sweat_user_id');
+        return saved ? Number(saved) : null;
+      });
+      const [showProfileSelector, setShowProfileSelector] = useState(false);
+      const [showAddForm, setShowAddForm] = useState(false);
+      const [newMemberName, setNewMemberName] = useState('');
+      const [newMemberAvatar, setNewMemberAvatar] = useState('🏃‍♂️');
 
       useEffect(() => {
         fetchData();
       }, []);
+
+      useEffect(() => {
+        if (!currentUserId && members.length > 0) {
+          setShowProfileSelector(true);
+        }
+      }, [currentUserId, members]);
 
       const fetchData = async () => {
         try {
@@ -798,9 +1072,31 @@
             duration: Number(r.duration),
             time: r.time,
             date: r.date,
-            isMorning: r.is_morning
+            isMorning: r.is_morning,
+            imageUrl: r.image_url
           }));
           setHistories(mappedRuns);
+
+          // 3. Fetch audit logs
+          const { data: dbLogs, error: logsError } = await supabaseClient
+            .from('audit_logs')
+            .select('*')
+            .order('id', { ascending: false })
+            .limit(10);
+
+          if (logsError) {
+            console.error("Audit logs fetch error:", logsError);
+          } else {
+            const mappedLogs = dbLogs.map(l => ({
+              id: l.id,
+              actionType: l.action_type,
+              editorName: l.editor_name,
+              runnerName: l.runner_name,
+              details: l.details,
+              createdAt: l.created_at
+            }));
+            setAuditLogs(mappedLogs);
+          }
         } catch (err) {
           console.error("Data fetch error:", err);
         } finally {
@@ -808,7 +1104,7 @@
         }
       };
 
-      const currentUser = members.find(m => m.isMe) || { name: '복케이', avatar: '👑', morningRuns: 0, totalRuns: 0, todayCompleted: false };
+      const currentUser = members.find(m => m.id === currentUserId) || members[0] || { name: '선택 안됨', avatar: '❓', morningRuns: 0, totalRuns: 0, todayCompleted: false };
 
       const getPenaltyCandidate = () => {
         if (members.length === 0) return '아잘 🔥';
@@ -824,7 +1120,62 @@
         return isImmune ? '없음 🎯' : `${candidate.name} ${candidate.avatar}`;
       };
 
+      const recalculateMemberStats = async (memberName) => {
+        try {
+          // 1. Query all runs for this member
+          const { data: userRuns, error: fetchError } = await supabaseClient
+            .from('runs')
+            .select('*')
+            .eq('name', memberName)
+            .order('id', { ascending: false });
+
+          if (fetchError) throw fetchError;
+
+          // 2. Aggregate stats
+          const totalRuns = userRuns.length;
+          const morningRuns = userRuns.filter(r => r.is_morning).length;
+          
+          const todayStr = new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' });
+          const todayCompleted = userRuns.some(r => r.date === todayStr);
+
+          let lastDistance = 0;
+          let lastDuration = 0;
+          let lastTime = '';
+          let lastRunType = '';
+
+          if (userRuns.length > 0) {
+            lastDistance = Number(userRuns[0].distance);
+            lastDuration = Number(userRuns[0].duration);
+            lastTime = userRuns[0].time;
+            lastRunType = userRuns[0].is_morning ? 'morning' : 'regular';
+          }
+
+          // 3. Update member row
+          const { error: updateError } = await supabaseClient
+            .from('members')
+            .update({
+              total_runs: totalRuns,
+              morning_runs: morningRuns,
+              today_completed: todayCompleted,
+              last_distance: lastDistance,
+              last_duration: lastDuration,
+              last_time: lastTime,
+              last_run_type: lastRunType
+            })
+            .eq('name', memberName);
+
+          if (updateError) throw updateError;
+        } catch (err) {
+          console.error("Recalculate stats error for member:", memberName, err);
+        }
+      };
+
       const handleUploadSuccess = async (runData) => {
+        if (!currentUserId) {
+          setShowProfileSelector(true);
+          return;
+        }
+
         try {
           setLoading(true);
           // 1. Insert new run into database
@@ -837,26 +1188,14 @@
               duration: runData.duration,
               time: runData.time,
               date: runData.date,
-              is_morning: runData.isMorning
+              is_morning: runData.isMorning,
+              image_url: runData.imageUrl
             }]);
 
           if (runError) throw runError;
 
-          // 2. Update member runs count
-          const { error: memberError } = await supabaseClient
-            .from('members')
-            .update({
-              today_completed: true,
-              total_runs: currentUser.totalRuns + 1,
-              morning_runs: runData.isMorning ? currentUser.morningRuns + 1 : currentUser.morningRuns,
-              last_distance: runData.distance,
-              last_duration: runData.duration,
-              last_time: runData.time,
-              last_run_type: runData.isMorning ? 'morning' : 'regular'
-            })
-            .eq('is_me', true);
-
-          if (memberError) throw memberError;
+          // 2. Recalculate member stats
+          await recalculateMemberStats(currentUser.name);
 
           // Refresh data
           await fetchData();
@@ -866,6 +1205,148 @@
         } finally {
           setLoading(false);
         }
+      };
+
+      const handleAddMember = async (e) => {
+        e.preventDefault();
+        if (!newMemberName.trim()) {
+          alert("이름을 입력해주세요!");
+          return;
+        }
+        try {
+          setLoading(true);
+          const { error } = await supabaseClient
+            .from('members')
+            .insert([{
+              name: newMemberName.trim(),
+              avatar: newMemberAvatar.trim() || '🏃‍♂️'
+            }]);
+          if (error) throw error;
+          
+          setNewMemberName('');
+          setNewMemberAvatar('🏃‍♂️');
+          setShowAddForm(false);
+          await fetchData();
+        } catch (err) {
+          console.error("Error adding member:", err);
+          alert("멤버 추가 중 오류가 발생했습니다.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleEditRun = async (runId, updatedData) => {
+        try {
+          setLoading(true);
+          // 1. Fetch the old run to know the original details
+          const { data: oldRun, error: fetchError } = await supabaseClient
+            .from('runs')
+            .select('*')
+            .eq('id', runId)
+            .single();
+          if (fetchError) throw fetchError;
+
+          // 2. Update the run
+          const { error: updateError } = await supabaseClient
+            .from('runs')
+            .update({
+              distance: updatedData.distance,
+              duration: updatedData.duration,
+              time: updatedData.time,
+              date: updatedData.date,
+              is_morning: updatedData.isMorning
+            })
+            .eq('id', runId);
+          if (updateError) throw updateError;
+
+          // 3. Generate description of changes
+          const changes = [];
+          if (Number(oldRun.distance) !== Number(updatedData.distance)) {
+            changes.push(`거리: ${oldRun.distance}km -> ${updatedData.distance}km`);
+          }
+          if (Number(oldRun.duration) !== Number(updatedData.duration)) {
+            changes.push(`시간: ${oldRun.duration}분 -> ${updatedData.duration}분`);
+          }
+          const oldTimeText = oldRun.is_morning ? '오전' : '오후';
+          const newTimeText = updatedData.isMorning ? '오전' : '오후';
+          if (oldTimeText !== newTimeText || oldRun.time !== updatedData.time) {
+            changes.push(`활동시간대: ${oldRun.time || oldTimeText} -> ${updatedData.time || newTimeText}`);
+          }
+          if (oldRun.date !== updatedData.date) {
+            changes.push(`날짜: ${oldRun.date} -> ${updatedData.date}`);
+          }
+
+          const changeSummary = changes.length > 0 ? changes.join(', ') : '상세정보 변경';
+          const logDetails = `${currentUser.name}님이 ${oldRun.name}님의 ${oldRun.date} 인증을 수정함 (${changeSummary})`;
+
+          // 4. Write edit log to audit_logs
+          const { error: logError } = await supabaseClient
+            .from('audit_logs')
+            .insert([{
+              action_type: 'EDIT',
+              editor_name: currentUser.name,
+              runner_name: oldRun.name,
+              details: logDetails
+            }]);
+          if (logError) console.error("Edit audit log error:", logError);
+
+          // 5. Recalculate stats
+          await recalculateMemberStats(oldRun.name);
+
+          await fetchData();
+        } catch (err) {
+          console.error("Edit run error:", err);
+          alert("인증 수정 중 오류가 발생했습니다: " + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleDeleteRun = async (runId) => {
+        if (!window.confirm("정말 이 인증 기록을 삭제하시겠습니까? (멤버의 주간 달리기 횟수도 함께 재계산됩니다.)")) {
+          return;
+        }
+        try {
+          setLoading(true);
+          const { data: runToDelete, error: fetchError } = await supabaseClient
+            .from('runs')
+            .select('*')
+            .eq('id', runId)
+            .single();
+          if (fetchError) throw fetchError;
+
+          const { error: deleteError } = await supabaseClient
+            .from('runs')
+            .delete()
+            .eq('id', runId);
+          if (deleteError) throw deleteError;
+
+          const logDetails = `${currentUser.name}님이 ${runToDelete.name}님의 ${runToDelete.date} 인증을 삭제함 (거리: ${runToDelete.distance}km, 시간: ${runToDelete.duration}분, ${runToDelete.time})`;
+          const { error: logError } = await supabaseClient
+            .from('audit_logs')
+            .insert([{
+              action_type: 'DELETE',
+              editor_name: currentUser.name,
+              runner_name: runToDelete.name,
+              details: logDetails
+            }]);
+          if (logError) console.error("Deletion audit log error:", logError);
+
+          await recalculateMemberStats(runToDelete.name);
+
+          await fetchData();
+        } catch (err) {
+          console.error("Delete run error:", err);
+          alert("인증 삭제 중 오류가 발생했습니다: " + err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const handleSelectMember = (id) => {
+        setCurrentUserId(id);
+        localStorage.setItem('run_sweat_user_id', id);
+        setShowProfileSelector(false);
       };
 
       return (
@@ -885,7 +1366,15 @@
               </div>
               
               <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
+                <button 
+                  onClick={() => setShowProfileSelector(true)}
+                  className="text-xs bg-brand-charcoal hover:bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-800 flex items-center gap-1.5 transition"
+                >
+                  <Icon name="user" size={13} className="text-brand-cyan" />
+                  접속자: <span className="text-brand-neon">{currentUser.avatar} {currentUser.name}</span>
+                </button>
+
+                <span className="hidden md:flex text-xs text-slate-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 items-center gap-1.5">
                   ⚡️ 이번 주 벌금 후보: <strong className="text-brand-red font-semibold font-outfit">{getPenaltyCandidate()}</strong>
                 </span>
               </div>
@@ -937,11 +1426,16 @@
                 )}
 
                 {activeTab === 'race' && (
-                  <RaceBoard members={members} />
+                  <RaceBoard members={members} currentUserId={currentUserId} />
                 )}
 
                 {activeTab === 'feed' && (
-                  <HistoryList histories={histories} />
+                  <HistoryList 
+                    histories={histories} 
+                    onDeleteRun={handleDeleteRun} 
+                    onEditRun={handleEditRun}
+                    auditLogs={auditLogs}
+                  />
                 )}
 
                 {activeTab === 'rules' && (
@@ -992,6 +1486,98 @@
               </div>
             )}
           </main>
+
+          {/* 접속자 프로필 선택 모달 */}
+          {showProfileSelector && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+              <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+                <h3 className="font-extrabold text-xl text-white text-center mb-2">🏃‍♂️ RunSweat 챌린지</h3>
+                <p className="text-xs text-slate-400 text-center mb-6">접속 중인 크루원을 선택해 주세요!</p>
+
+                <div className="space-y-3">
+                  {members.map(member => (
+                    <button
+                      key={member.id}
+                      onClick={() => handleSelectMember(member.id)}
+                      className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition ${
+                        member.id === currentUserId
+                          ? 'bg-brand-neon/15 border-brand-neon text-brand-neon'
+                          : 'bg-brand-charcoal hover:bg-slate-800 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{member.avatar}</span>
+                        <span className="font-semibold text-sm">{member.name}</span>
+                      </div>
+                      {member.id === currentUserId && <Icon name="check" size={16} />}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 새 멤버 추가 버튼 및 입력 폼 */}
+                <div className="mt-4 pt-4 border-t border-slate-800/80">
+                  {!showAddForm ? (
+                    <button
+                      onClick={() => setShowAddForm(true)}
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition flex items-center justify-center gap-1.5"
+                    >
+                      ➕ 새로운 크루원 추가하기
+                    </button>
+                  ) : (
+                    <form onSubmit={handleAddMember} className="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                      <div className="flex gap-2">
+                        <div className="w-1/4">
+                          <label className="block text-[10px] text-slate-500 mb-1 font-medium">아이콘(이모지)</label>
+                          <input
+                            type="text"
+                            value={newMemberAvatar}
+                            onChange={(e) => setNewMemberAvatar(e.target.value)}
+                            placeholder="🏃‍♂️"
+                            maxLength="4"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-2 text-center text-sm focus:border-brand-cyan focus:outline-none"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[10px] text-slate-500 mb-1 font-medium">이름</label>
+                          <input
+                            type="text"
+                            value={newMemberName}
+                            onChange={(e) => setNewMemberName(e.target.value)}
+                            placeholder="이름 입력 (예: 홍길동)"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-medium"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddForm(false)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-1.5 rounded-lg text-xs font-semibold transition"
+                        >
+                          취소
+                        </button>
+                        <button
+                          type="submit"
+                          className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan py-1.5 rounded-lg text-xs font-bold transition border border-brand-cyan/45 shadow-cyan-glow"
+                        >
+                          크루원 등록!
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                {currentUserId && (
+                  <button 
+                    onClick={() => setShowProfileSelector(false)}
+                    className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition"
+                  >
+                    닫기
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       );
     }

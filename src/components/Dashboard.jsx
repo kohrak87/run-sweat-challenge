@@ -5,9 +5,15 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [dragActive, setDragActive] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
-  const [runTime, setRunTime] = useState("07:30"); // Default morning run
+  const [timeOfDay, setTimeOfDay] = useState("morning"); // "morning" or "afternoon"
   const [runDistance, setRunDistance] = useState("5.2"); // Default valid distance
   const [runDuration, setRunDuration] = useState("35"); // Default valid duration
+  const [runDate, setRunDate] = useState(() => {
+    const today = new Date();
+    const offset = today.getTimezoneOffset();
+    const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+    return localToday.toISOString().split('T')[0];
+  });
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isUrgent, setIsUrgent] = useState(false);
 
@@ -88,21 +94,49 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
     }
   };
 
-  const submitRunAuth = () => {
+  const compressImage = (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 400;
+          const scaleSize = MAX_WIDTH / img.width;
+          canvas.width = MAX_WIDTH;
+          canvas.height = img.height * scaleSize;
+
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          resolve(dataUrl);
+        };
+      };
+    });
+  };
+
+  const submitRunAuth = async () => {
     // Run Validation Rules
     const distance = parseFloat(runDistance);
     const duration = parseFloat(runDuration);
-    const hour = parseInt(runTime.split(":")[0]);
     
     // Rule 1: 30 mins or 5km
     const isValidDistanceOrTime = distance >= 5.0 || duration >= 30;
     
     // Rule 2: Morning definition (05:00 - 09:00)
-    const isMorning = hour >= 5 && hour < 9;
+    const isMorning = timeOfDay === 'morning';
+    const runTime = isMorning ? "오전" : "오후";
 
     if (!isValidDistanceOrTime) {
       alert("❌ 운동 불인정! 5km 이상 또는 30분 이상 달리기 기준을 만족해야 합니다.");
       return;
+    }
+
+    let imageUrl = null;
+    if (uploadFile) {
+      imageUrl = await compressImage(uploadFile);
     }
 
     onUploadSuccess({
@@ -110,7 +144,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       duration,
       time: runTime,
       isMorning,
-      date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' })
+      date: new Date(runDate).toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' }),
+      imageUrl
     });
 
     setShowModal(false);
@@ -314,14 +349,32 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시작 시간 (Hour)</label>
-                  <input 
-                    type="time" 
-                    value={runTime} 
-                    onChange={(e) => setRunTime(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">오전 5시 ~ 9시: 아침인정</p>
+                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 시간대</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTimeOfDay('morning')}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                        timeOfDay === 'morning'
+                          ? 'bg-brand-cyan/15 border-brand-cyan text-brand-cyan shadow-cyan-glow'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      오전 🌅
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTimeOfDay('afternoon')}
+                      className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-all ${
+                        timeOfDay === 'afternoon'
+                          ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      오후 🌃
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1.5">오전 선택 시 아침 러닝으로 인정</p>
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1.5 font-medium">러닝 거리 (km)</label>
@@ -338,16 +391,27 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs text-slate-400 mb-1.5 font-medium">달린 시간 (분)</label>
-                <div className="relative">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">활동 날짜</label>
                   <input 
-                    type="number" 
-                    value={runDuration} 
-                    onChange={(e) => setRunDuration(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                    type="date" 
+                    value={runDate} 
+                    onChange={(e) => setRunDate(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-mono"
                   />
-                  <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">달린 시간 (분)</label>
+                  <div className="relative">
+                    <input 
+                      type="number" 
+                      value={runDuration} 
+                      onChange={(e) => setRunDuration(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                    />
+                    <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
+                  </div>
                 </div>
               </div>
 

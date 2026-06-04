@@ -48,3 +48,16 @@ INSERT INTO runs (name, avatar, distance, duration, time, date, is_morning) VALU
 ('복케이', '👑', 5.5, 32, '07:45', '5월 31일 (일)', true),
 ('원팔', '⚡️', 4.8, 31, '20:10', '5월 30일 (토)', false),
 ('복케이', '👑', 6.0, 38, '19:30', '5월 30일 (토)', false);
+
+-- 6. 수정/삭제 감사 로그 테이블 생성
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  action_type TEXT NOT NULL,
+  editor_name TEXT NOT NULL,
+  runner_name TEXT NOT NULL,
+  details TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
+

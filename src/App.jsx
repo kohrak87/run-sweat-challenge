@@ -3,17 +3,33 @@ import Dashboard from './components/Dashboard';
 import RaceBoard from './components/RaceBoard';
 import HistoryList from './components/HistoryList';
 import { supabase } from './supabaseClient';
-import { Sparkles, Activity, FileText, Loader2 } from 'lucide-react';
+import { Sparkles, Activity, FileText, Loader2, User, Check } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [members, setMembers] = useState([]);
   const [histories, setHistories] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState(() => {
+    const saved = localStorage.getItem('run_sweat_user_id');
+    return saved ? Number(saved) : null;
+  });
+  const [showProfileSelector, setShowProfileSelector] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberAvatar, setNewMemberAvatar] = useState('🏃‍♂️');
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Force show profile selector if no user is selected
+  useEffect(() => {
+    if (!currentUserId && members.length > 0) {
+      setShowProfileSelector(true);
+    }
+  }, [currentUserId, members]);
 
   const fetchData = async () => {
     try {
@@ -58,9 +74,31 @@ export default function App() {
         duration: Number(r.duration),
         time: r.time,
         date: r.date,
-        isMorning: r.is_morning
+        isMorning: r.is_morning,
+        imageUrl: r.image_url
       }));
       setHistories(mappedRuns);
+
+      // 3. Fetch audit logs
+      const { data: dbLogs, error: logsError } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('id', { ascending: false })
+        .limit(10);
+
+      if (logsError) {
+        console.error("Audit logs fetch error:", logsError);
+      } else {
+        const mappedLogs = dbLogs.map(l => ({
+          id: l.id,
+          actionType: l.action_type,
+          editorName: l.editor_name,
+          runnerName: l.runner_name,
+          details: l.details,
+          createdAt: l.created_at
+        }));
+        setAuditLogs(mappedLogs);
+      }
     } catch (err) {
       console.error("Data fetch error:", err);
     } finally {
@@ -68,7 +106,7 @@ export default function App() {
     }
   };
 
-  const currentUser = members.find(m => m.isMe) || { name: '복케이', avatar: '👑', morningRuns: 0, totalRuns: 0, todayCompleted: false };
+  const currentUser = members.find(m => m.id === currentUserId) || members[0] || { name: '선택 안됨', avatar: '❓', morningRuns: 0, totalRuns: 0, todayCompleted: false };
 
   // Calculate default penalty candidate based on members loaded
   const getPenaltyCandidate = () => {
@@ -85,7 +123,62 @@ export default function App() {
     return isImmune ? '없음 🎯' : `${candidate.name} ${candidate.avatar}`;
   };
 
+  const recalculateMemberStats = async (memberName) => {
+    try {
+      // 1. Query all runs for this member
+      const { data: userRuns, error: fetchError } = await supabase
+        .from('runs')
+        .select('*')
+        .eq('name', memberName)
+        .order('id', { ascending: false });
+
+      if (fetchError) throw fetchError;
+
+      // 2. Aggregate stats
+      const totalRuns = userRuns.length;
+      const morningRuns = userRuns.filter(r => r.is_morning).length;
+      
+      const todayStr = new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' });
+      const todayCompleted = userRuns.some(r => r.date === todayStr);
+
+      let lastDistance = 0;
+      let lastDuration = 0;
+      let lastTime = '';
+      let lastRunType = '';
+
+      if (userRuns.length > 0) {
+        lastDistance = Number(userRuns[0].distance);
+        lastDuration = Number(userRuns[0].duration);
+        lastTime = userRuns[0].time;
+        lastRunType = userRuns[0].is_morning ? 'morning' : 'regular';
+      }
+
+      // 3. Update member row
+      const { error: updateError } = await supabase
+        .from('members')
+        .update({
+          total_runs: totalRuns,
+          morning_runs: morningRuns,
+          today_completed: todayCompleted,
+          last_distance: lastDistance,
+          last_duration: lastDuration,
+          last_time: lastTime,
+          last_run_type: lastRunType
+        })
+        .eq('name', memberName);
+
+      if (updateError) throw updateError;
+    } catch (err) {
+      console.error("Recalculate stats error for member:", memberName, err);
+    }
+  };
+
   const handleUploadSuccess = async (runData) => {
+    if (!currentUserId) {
+      setShowProfileSelector(true);
+      return;
+    }
+    
     try {
       setLoading(true);
       // 1. Insert new run into database
@@ -98,35 +191,169 @@ export default function App() {
           duration: runData.duration,
           time: runData.time,
           date: runData.date,
-          is_morning: runData.isMorning
+          is_morning: runData.isMorning,
+          image_url: runData.imageUrl
         }]);
 
       if (runError) throw runError;
 
-      // 2. Update member runs count
-      const { error: memberError } = await supabase
-        .from('members')
-        .update({
-          today_completed: true,
-          total_runs: currentUser.totalRuns + 1,
-          morning_runs: runData.isMorning ? currentUser.morningRuns + 1 : currentUser.morningRuns,
-          last_distance: runData.distance,
-          last_duration: runData.duration,
-          last_time: runData.time,
-          last_run_type: runData.isMorning ? 'morning' : 'regular'
-        })
-        .eq('is_me', true);
-
-      if (memberError) throw memberError;
+      // 2. Recalculate member stats
+      await recalculateMemberStats(currentUser.name);
 
       // Refresh data
       await fetchData();
     } catch (err) {
       console.error("Upload handler error:", err);
-      alert("데이터 전송 중 오류가 발생했습니다.");
+      alert("데이터 전송 중 오류가 발생했습니다: " + (err.message || JSON.stringify(err)));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAddMember = async (e) => {
+    e.preventDefault();
+    if (!newMemberName.trim()) {
+      alert("이름을 입력해주세요!");
+      return;
+    }
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('members')
+        .insert([{
+          name: newMemberName.trim(),
+          avatar: newMemberAvatar.trim() || '🏃‍♂️'
+        }]);
+      if (error) throw error;
+      
+      setNewMemberName('');
+      setNewMemberAvatar('🏃‍♂️');
+      setShowAddForm(false);
+      await fetchData();
+    } catch (err) {
+      console.error("Error adding member:", err);
+      alert("멤버 추가 중 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditRun = async (runId, updatedData) => {
+    try {
+      setLoading(true);
+      // 1. Fetch the old run to know the original details
+      const { data: oldRun, error: fetchError } = await supabase
+        .from('runs')
+        .select('*')
+        .eq('id', runId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      // 2. Update the run
+      const { error: updateError } = await supabase
+        .from('runs')
+        .update({
+          distance: updatedData.distance,
+          duration: updatedData.duration,
+          time: updatedData.time,
+          date: updatedData.date,
+          is_morning: updatedData.isMorning
+        })
+        .eq('id', runId);
+      if (updateError) throw updateError;
+
+      // 3. Generate description of changes
+      const changes = [];
+      if (Number(oldRun.distance) !== Number(updatedData.distance)) {
+        changes.push(`거리: ${oldRun.distance}km -> ${updatedData.distance}km`);
+      }
+      if (Number(oldRun.duration) !== Number(updatedData.duration)) {
+        changes.push(`시간: ${oldRun.duration}분 -> ${updatedData.duration}분`);
+      }
+      const oldTimeText = oldRun.is_morning ? '오전' : '오후';
+      const newTimeText = updatedData.isMorning ? '오전' : '오후';
+      if (oldTimeText !== newTimeText || oldRun.time !== updatedData.time) {
+        changes.push(`활동시간대: ${oldRun.time || oldTimeText} -> ${updatedData.time || newTimeText}`);
+      }
+      if (oldRun.date !== updatedData.date) {
+        changes.push(`날짜: ${oldRun.date} -> ${updatedData.date}`);
+      }
+
+      const changeSummary = changes.length > 0 ? changes.join(', ') : '상세정보 변경';
+      const logDetails = `${currentUser.name}님이 ${oldRun.name}님의 ${oldRun.date} 인증을 수정함 (${changeSummary})`;
+
+      // 4. Write edit log to audit_logs
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          action_type: 'EDIT',
+          editor_name: currentUser.name,
+          runner_name: oldRun.name,
+          details: logDetails
+        }]);
+      if (logError) console.error("Edit audit log error:", logError);
+
+      // 5. Recalculate stats
+      await recalculateMemberStats(oldRun.name);
+
+      await fetchData();
+    } catch (err) {
+      console.error("Edit run error:", err);
+      alert("인증 수정 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteRun = async (runId) => {
+    if (!window.confirm("정말 이 인증 기록을 삭제하시겠습니까? (멤버의 주간 달리기 횟수도 함께 재계산됩니다.)")) {
+      return;
+    }
+    try {
+      setLoading(true);
+      // 1. Fetch the run to know the runner and stats
+      const { data: runToDelete, error: fetchError } = await supabase
+        .from('runs')
+        .select('*')
+        .eq('id', runId)
+        .single();
+      if (fetchError) throw fetchError;
+
+      // 2. Delete the run
+      const { error: deleteError } = await supabase
+        .from('runs')
+        .delete()
+        .eq('id', runId);
+      if (deleteError) throw deleteError;
+
+      // 3. Write deletion log in audit_logs
+      const logDetails = `${currentUser.name}님이 ${runToDelete.name}님의 ${runToDelete.date} 인증을 삭제함 (거리: ${runToDelete.distance}km, 시간: ${runToDelete.duration}분, ${runToDelete.time})`;
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          action_type: 'DELETE',
+          editor_name: currentUser.name,
+          runner_name: runToDelete.name,
+          details: logDetails
+        }]);
+      if (logError) console.error("Deletion audit log error:", logError);
+
+      // 4. Recalculate stats
+      await recalculateMemberStats(runToDelete.name);
+
+      await fetchData();
+    } catch (err) {
+      console.error("Delete run error:", err);
+      alert("인증 삭제 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectMember = (id) => {
+    setCurrentUserId(id);
+    localStorage.setItem('run_sweat_user_id', id);
+    setShowProfileSelector(false);
   };
 
   return (
@@ -147,7 +374,16 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 flex items-center gap-1.5">
+            {/* User Profile Selector Trigger */}
+            <button 
+              onClick={() => setShowProfileSelector(true)}
+              className="text-xs bg-brand-charcoal hover:bg-slate-800 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-800 flex items-center gap-1.5 transition"
+            >
+              <User size={13} className="text-brand-cyan" />
+              접속자: <span className="text-brand-neon">{currentUser.avatar} {currentUser.name}</span>
+            </button>
+
+            <span className="hidden md:flex text-xs text-slate-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 items-center gap-1.5">
               <Sparkles size={12} className="text-brand-neon" />
               이번 주 벌금 후보: <strong className="text-brand-red font-semibold font-outfit">{getPenaltyCandidate()}</strong>
             </span>
@@ -204,11 +440,16 @@ export default function App() {
             )}
 
             {activeTab === 'race' && (
-              <RaceBoard members={members} />
+              <RaceBoard members={members} currentUserId={currentUserId} />
             )}
 
             {activeTab === 'feed' && (
-              <HistoryList histories={histories} />
+              <HistoryList 
+                histories={histories} 
+                onDeleteRun={handleDeleteRun} 
+                onEditRun={handleEditRun}
+                auditLogs={auditLogs}
+              />
             )}
 
             {activeTab === 'rules' && (
@@ -259,6 +500,98 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* 접속자 프로필 선택 모달 */}
+      {showProfileSelector && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+            <h3 className="font-extrabold text-xl text-white text-center mb-2">🏃‍♂️ RunSweat 챌린지</h3>
+            <p className="text-xs text-slate-400 text-center mb-6">접속 중인 크루원을 선택해 주세요!</p>
+
+            <div className="space-y-3">
+              {members.map(member => (
+                <button
+                  key={member.id}
+                  onClick={() => handleSelectMember(member.id)}
+                  className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition ${
+                    member.id === currentUserId
+                      ? 'bg-brand-neon/15 border-brand-neon text-brand-neon'
+                      : 'bg-brand-charcoal hover:bg-slate-800 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{member.avatar}</span>
+                    <span className="font-semibold text-sm">{member.name}</span>
+                  </div>
+                  {member.id === currentUserId && <Check size={16} />}
+                </button>
+              ))}
+            </div>
+
+            {/* 새 멤버 추가 버튼 및 입력 폼 */}
+            <div className="mt-4 pt-4 border-t border-slate-800/80">
+              {!showAddForm ? (
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition flex items-center justify-center gap-1.5"
+                >
+                  ➕ 새로운 크루원 추가하기
+                </button>
+              ) : (
+                <form onSubmit={handleAddMember} className="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                  <div className="flex gap-2">
+                    <div className="w-1/4">
+                      <label className="block text-[10px] text-slate-500 mb-1 font-medium">아이콘(이모지)</label>
+                      <input
+                        type="text"
+                        value={newMemberAvatar}
+                        onChange={(e) => setNewMemberAvatar(e.target.value)}
+                        placeholder="🏃‍♂️"
+                        maxLength="4"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-2 text-center text-sm focus:border-brand-cyan focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-slate-500 mb-1 font-medium">이름</label>
+                      <input
+                        type="text"
+                        value={newMemberName}
+                        onChange={(e) => setNewMemberName(e.target.value)}
+                        placeholder="이름 입력 (예: 홍길동)"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-medium"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddForm(false)}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-1.5 rounded-lg text-xs font-semibold transition"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan py-1.5 rounded-lg text-xs font-bold transition border border-brand-cyan/45 shadow-cyan-glow"
+                    >
+                      크루원 등록!
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+
+            {currentUserId && (
+              <button 
+                onClick={() => setShowProfileSelector(false)}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition"
+              >
+                닫기
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

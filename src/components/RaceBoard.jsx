@@ -1,7 +1,7 @@
 import React from 'react';
 import { ShieldAlert, Trophy, Bomb, DollarSign, Award } from 'lucide-react';
 
-export default function RaceBoard({ members }) {
+export default function RaceBoard({ members, currentUserId }) {
   // Sort members by performance (descending order) to compute ranks
   const sortedMembers = [...members].sort((a, b) => {
     // 100% completion (immunity) gets prioritized
@@ -93,8 +93,8 @@ export default function RaceBoard({ members }) {
                   
                   {/* Name banner */}
                   <div className="flex flex-col">
-                    <span className={`text-xs font-bold ${member.isMe ? 'text-brand-neon font-black' : 'text-slate-200'}`}>
-                      {member.name} {member.isMe && '(나)'}
+                    <span className={`text-xs font-bold ${member.id === currentUserId ? 'text-brand-neon font-black' : 'text-slate-200'}`}>
+                      {member.name} {member.id === currentUserId && '(나)'}
                     </span>
                     <span className="text-[9px] text-slate-500 font-mono">
                       AM {member.morningRuns}/3 | TOT {member.totalRuns}/4
@@ -127,7 +127,7 @@ export default function RaceBoard({ members }) {
                   <span className="text-xl">{member.avatar}</span>
                   <div>
                     <span className="text-sm font-semibold block">
-                      {member.name} {member.isMe && <span className="text-[10px] text-brand-neon bg-brand-neon/15 px-1.5 py-0.2 rounded ml-1">Me</span>}
+                      {member.name} {member.id === currentUserId && <span className="text-[10px] text-brand-neon bg-brand-neon/15 px-1.5 py-0.2 rounded ml-1">Me</span>}
                     </span>
                     <span className="text-[10px] text-slate-400">
                       아침인증 {member.morningRuns}회 / 총 {member.totalRuns}회
