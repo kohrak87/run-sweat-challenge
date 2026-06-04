@@ -8,11 +8,20 @@ export default function AdminPanel({
   onResetAllData, 
   histories, 
   onDeleteRun, 
-  onEditRun 
+  onEditRun,
+  members,
+  onRenameMember
 }) {
   const [passcode, setPasscode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   
+  const handlePromptRename = (member) => {
+    const newName = window.prompt(`'${member.name}' 크루원의 새 이름을 입력하세요:`, member.name);
+    if (newName && newName.trim() && newName.trim() !== member.name) {
+      onRenameMember(member.id, member.name, newName.trim());
+    }
+  };
+
   // For editing a run inside admin panel
   const [editingRun, setEditingRun] = useState(null);
   const [editDistance, setEditDistance] = useState('');
@@ -145,6 +154,30 @@ export default function AdminPanel({
               <RefreshCw size={14} />
               이번 주 데이터 전체 초기화
             </button>
+          </div>
+
+          <div className="glass-panel border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="font-bold text-sm text-white flex items-center gap-1.5">👥 크루원 이름 변경</h3>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              크루원의 이름을 변경합니다. 기존 러닝 인증 기록과 통계 데이터의 이름도 함께 업데이트됩니다.
+            </p>
+            
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {members && members.map((m) => (
+                <div key={m.id} className="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-900/60">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">{m.avatar}</span>
+                    <span className="text-xs font-semibold text-slate-200">{m.name}</span>
+                  </div>
+                  <button
+                    onClick={() => handlePromptRename(m)}
+                    className="text-[10px] bg-slate-850 hover:bg-brand-cyan/25 hover:text-brand-cyan text-slate-300 font-bold px-2 py-1 rounded transition border border-slate-800 hover:border-brand-cyan/30"
+                  >
+                    이름 변경
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

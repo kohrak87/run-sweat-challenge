@@ -419,6 +419,54 @@ export default function App() {
     }
   };
 
+  const handleRenameMember = async (memberId, oldName, newName) => {
+    if (!newName.trim()) {
+      alert("이름을 입력해주세요!");
+      return;
+    }
+    if (oldName === newName.trim()) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      
+      // 1. Update name in members table
+      const { error: memberUpdateError } = await supabase
+        .from('members')
+        .update({ name: newName.trim() })
+        .eq('id', memberId);
+      if (memberUpdateError) throw memberUpdateError;
+      
+      // 2. Update name in runs table to preserve history
+      const { error: runsUpdateError } = await supabase
+        .from('runs')
+        .update({ name: newName.trim() })
+        .eq('name', oldName);
+      if (runsUpdateError) throw runsUpdateError;
+      
+      // 3. Write rename log in audit_logs
+      const logDetails = `${currentUser.name}님이 크루원 이름을 수정함 (${oldName} -> ${newName.trim()})`;
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          action_type: 'RENAME_MEMBER',
+          editor_name: currentUser.name,
+          runner_name: oldName,
+          details: logDetails
+        }]);
+      if (logError) console.error("Rename member audit log error:", logError);
+      
+      alert(`✅ 크루원 이름이 수정되었습니다. (${oldName} -> ${newName.trim()})`);
+      await fetchData();
+    } catch (err) {
+      console.error("Rename member error:", err);
+      alert("크루원 이름 수정 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelectMember = (id) => {
     setCurrentUserId(id);
     localStorage.setItem('run_sweat_user_id', id);
@@ -537,6 +585,8 @@ export default function App() {
                 histories={histories}
                 onDeleteRun={handleDeleteRun}
                 onEditRun={handleEditRun}
+                members={members}
+                onRenameMember={handleRenameMember}
               />
             )}
 
