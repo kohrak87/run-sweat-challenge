@@ -23,7 +23,7 @@ export default function AdminPanel({
 
   const handleSubmitPasscode = (e) => {
     e.preventDefault();
-    if (passcode === '1234') {
+    if (passcode === '0001') {
       onUnlock();
       setErrorMsg('');
       setPasscode('');
@@ -86,7 +86,7 @@ export default function AdminPanel({
               type="password"
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
-              placeholder="비밀번호 입력 (기본: 1234)"
+              placeholder="비밀번호 입력"
               className="w-full bg-slate-950 border border-slate-850 rounded-xl py-3 px-4 text-center text-sm font-semibold tracking-widest focus:border-brand-cyan focus:outline-none text-white transition-all"
               autoFocus
             />
