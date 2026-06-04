@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Calendar, Clock, MapPin, Eye, Award } from 'lucide-react';
 
-export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLogs }) {
+export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLogs, isAdminUnlocked }) {
   const [selectedHistory, setSelectedHistory] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editDistance, setEditDistance] = useState('');
@@ -313,7 +313,7 @@ export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLo
                     취소
                   </button>
                 </>
-              ) : (
+              ) : isAdminUnlocked ? (
                 <>
                   <button 
                     onClick={() => setIsEditing(true)}
@@ -332,6 +332,18 @@ export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLo
                   >
                     🗑️ 이 인증 삭제하기
                   </button>
+                  <button 
+                    onClick={() => setSelectedHistory(null)}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"
+                  >
+                    닫기
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 text-center py-2.5 px-3 bg-slate-900 border border-slate-850 rounded-xl text-slate-400 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    🔒 피드 수정/삭제는 관리자 탭에서 비밀번호 인증 후 가능합니다.
+                  </div>
                   <button 
                     onClick={() => setSelectedHistory(null)}
                     className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl text-xs transition"

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import RaceBoard from './components/RaceBoard';
 import HistoryList from './components/HistoryList';
+import AdminPanel from './components/AdminPanel';
 import { supabase } from './supabaseClient';
-import { Sparkles, Activity, FileText, Loader2, User, Check } from 'lucide-react';
+import { Sparkles, Activity, FileText, Loader2, User, Check, Settings } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -14,6 +15,9 @@ export default function App() {
   const [currentUserId, setCurrentUserId] = useState(() => {
     const saved = localStorage.getItem('run_sweat_user_id');
     return saved ? Number(saved) : null;
+  });
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState(() => {
+    return sessionStorage.getItem('run_sweat_admin_unlocked') === 'true';
   });
   const [showProfileSelector, setShowProfileSelector] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -350,6 +354,71 @@ export default function App() {
     }
   };
 
+  const handleUnlock = () => {
+    setIsAdminUnlocked(true);
+    sessionStorage.setItem('run_sweat_admin_unlocked', 'true');
+  };
+
+  const handleLock = () => {
+    setIsAdminUnlocked(false);
+    sessionStorage.removeItem('run_sweat_admin_unlocked');
+  };
+
+  const handleResetAllData = async () => {
+    if (!window.confirm("⚠️ 경고: 모든 러닝 인증 내역(runs 테이블)을 삭제하고 크루원들의 주간 통계(morning_runs, total_runs, today_completed 등)를 0으로 초기화하시겠습니까?")) {
+      return;
+    }
+    if (!window.confirm("⚠️ 마지막 경고: 이 작업은 절대 되돌릴 수 없습니다. 정말로 진행하시겠습니까?")) {
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      
+      // 1. Delete all runs
+      const { error: deleteRunsError } = await supabase
+        .from('runs')
+        .delete()
+        .neq('id', 0);
+      if (deleteRunsError) throw deleteRunsError;
+      
+      // 2. Reset all member stats in DB
+      const { error: resetMembersError } = await supabase
+        .from('members')
+        .update({
+          morning_runs: 0,
+          total_runs: 0,
+          today_completed: false,
+          last_distance: 0,
+          last_duration: 0,
+          last_time: '',
+          last_run_type: ''
+        })
+        .neq('id', 0);
+      if (resetMembersError) throw resetMembersError;
+      
+      // 3. Write a reset event log in audit_logs
+      const logDetails = `${currentUser.name}님이 모든 러닝 인증 내역 및 주간 통계를 초기화(리셋)했습니다.`;
+      const { error: logError } = await supabase
+        .from('audit_logs')
+        .insert([{
+          action_type: 'RESET',
+          editor_name: currentUser.name,
+          runner_name: 'ALL',
+          details: logDetails
+        }]);
+      if (logError) console.error("Reset audit log error:", logError);
+      
+      alert("✅ 모든 인증 데이터와 주간 통계가 성공적으로 초기화되었습니다!");
+      await fetchData();
+    } catch (err) {
+      console.error("Reset all data error:", err);
+      alert("초기화 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSelectMember = (id) => {
     setCurrentUserId(id);
     localStorage.setItem('run_sweat_user_id', id);
@@ -419,6 +488,12 @@ export default function App() {
           >
             숙제방 규칙
           </button>
+          <button 
+            onClick={() => setActiveTab('admin')}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all flex items-center gap-1.5 ${activeTab === 'admin' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+          >
+            <Settings size={14} /> 관리자
+          </button>
         </div>
 
         {/* Loading overlay */}
@@ -449,6 +524,19 @@ export default function App() {
                 onDeleteRun={handleDeleteRun} 
                 onEditRun={handleEditRun}
                 auditLogs={auditLogs}
+                isAdminUnlocked={isAdminUnlocked}
+              />
+            )}
+
+            {activeTab === 'admin' && (
+              <AdminPanel
+                isAdminUnlocked={isAdminUnlocked}
+                onUnlock={handleUnlock}
+                onLock={handleLock}
+                onResetAllData={handleResetAllData}
+                histories={histories}
+                onDeleteRun={handleDeleteRun}
+                onEditRun={handleEditRun}
               />
             )}
 
