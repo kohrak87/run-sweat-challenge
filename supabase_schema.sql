@@ -63,3 +63,28 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
 
+-- 7. RLS 활성화 시 보안 정책 설정 (개발 편의 및 API 삭제 기능을 위해 전체 허용)
+-- 만약 Supabase에서 RLS를 비활성화하지 않는 경우, 아래 정책을 추가하여 작동하도록 합니다.
+
+-- members 테이블 정책
+-- ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read on members" ON members FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on members" ON members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on members" ON members FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on members" ON members FOR DELETE USING (true);
+
+-- runs 테이블 정책
+-- ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read on runs" ON runs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on runs" ON runs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on runs" ON runs FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on runs" ON runs FOR DELETE USING (true);
+
+-- audit_logs 테이블 정책
+-- ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read on audit_logs" ON audit_logs FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on audit_logs" ON audit_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on audit_logs" ON audit_logs FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete on audit_logs" ON audit_logs FOR DELETE USING (true);
+
+

@@ -1,6 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Timer, CheckCircle, AlertTriangle, HelpCircle, Activity } from 'lucide-react';
 
+const formatKoDate = (dateInput) => {
+  let d;
+  if (!dateInput) {
+    d = new Date();
+  } else {
+    if (typeof dateInput === 'string' && dateInput.includes('-')) {
+      const parts = dateInput.split('-');
+      d = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      d = new Date(dateInput);
+    }
+  }
+  const month = d.getMonth() + 1;
+  const date = d.getDate();
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const dayName = dayNames[d.getDay()];
+  return `${month}월 ${date}일 (${dayName})`;
+};
+
 export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [dragActive, setDragActive] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -144,7 +163,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       duration,
       time: runTime,
       isMorning,
-      date: new Date(runDate).toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' }),
+      date: formatKoDate(runDate),
       imageUrl
     });
 

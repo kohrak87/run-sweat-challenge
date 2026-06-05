@@ -98,6 +98,25 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
+    const formatKoDate = (dateInput) => {
+      let d;
+      if (!dateInput) {
+        d = new Date();
+      } else {
+        if (typeof dateInput === 'string' && dateInput.includes('-')) {
+          const parts = dateInput.split('-');
+          d = new Date(parts[0], parts[1] - 1, parts[2]);
+        } else {
+          d = new Date(dateInput);
+        }
+      }
+      const month = d.getMonth() + 1;
+      const date = d.getDate();
+      const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+      const dayName = dayNames[d.getDay()];
+      return `${month}월 ${date}일 (${dayName})`;
+    };
+
     // React Lucide Wrapper
     const Icon = ({ name, size = 16, className = "" }) => {
       useEffect(() => {
@@ -234,7 +253,7 @@
           duration,
           time: runTime,
           isMorning,
-          date: new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' }),
+          date: formatKoDate(),
           imageUrl
         });
 
@@ -1412,36 +1431,62 @@
       const fetchData = async () => {
         try {
           setLoading(true);
-          // 1. Fetch members
-          const { data: dbMembers, error: memError } = await supabaseClient
-            .from('members')
-            .select('*')
-            .order('id', { ascending: true });
+          // 1. Fetch members and runs in parallel
+          const [membersRes, runsRes] = await Promise.all([
+            supabaseClient.from('members').select('*').order('id', { ascending: true }),
+            supabaseClient.from('runs').select('*').order('id', { ascending: false })
+          ]);
           
-          if (memError) throw memError;
+          if (membersRes.error) throw membersRes.error;
+          if (runsRes.error) throw runsRes.error;
 
-          const mappedMembers = dbMembers.map(m => ({
-            id: m.id,
-            name: m.name,
-            avatar: m.avatar,
-            morningRuns: m.morning_runs,
-            totalRuns: m.total_runs,
-            todayCompleted: m.today_completed,
-            lastDistance: Number(m.last_distance),
-            lastDuration: Number(m.last_duration),
-            lastTime: m.last_time,
-            lastRunType: m.last_run_type,
-            isMe: m.is_me
-          }));
+           const dbMembers = membersRes.data;
+          const dbRuns = runsRes.data;
+
+          const todayStr = formatKoDate();
+
+          // Auto-reset today_completed in DB if it's a new day and there is no run today
+          const membersToReset = dbMembers.filter(m => {
+            const hasRunToday = dbRuns.some(r => r.name === m.name && r.date === todayStr);
+            return m.today_completed && !hasRunToday;
+          });
+
+          if (membersToReset.length > 0) {
+            const idsToReset = membersToReset.map(m => m.id);
+            const { error: resetError } = await supabaseClient
+              .from('members')
+              .update({ today_completed: false })
+              .in('id', idsToReset);
+            
+            if (resetError) {
+              console.error("Auto-reset today_completed error:", resetError);
+            } else {
+              dbMembers.forEach(m => {
+                if (idsToReset.includes(m.id)) {
+                  m.today_completed = false;
+                }
+              });
+            }
+          }
+
+          const mappedMembers = dbMembers.map(m => {
+            // Calculate today's completion status dynamically based on current date runs
+            const hasRunToday = dbRuns.some(r => r.name === m.name && r.date === todayStr);
+            return {
+              id: m.id,
+              name: m.name,
+              avatar: m.avatar,
+              morningRuns: m.morning_runs,
+              totalRuns: m.total_runs,
+              todayCompleted: hasRunToday,
+              lastDistance: Number(m.last_distance),
+              lastDuration: Number(m.last_duration),
+              lastTime: m.last_time,
+              lastRunType: m.last_run_type,
+              isMe: m.is_me
+            };
+          });
           setMembers(mappedMembers);
-
-          // 2. Fetch runs histories
-          const { data: dbRuns, error: runsError } = await supabaseClient
-            .from('runs')
-            .select('*')
-            .order('id', { ascending: false });
-
-          if (runsError) throw runsError;
 
           const mappedRuns = dbRuns.map(r => ({
             id: r.id,
@@ -1514,7 +1559,7 @@
           const totalRuns = userRuns.length;
           const morningRuns = userRuns.filter(r => r.is_morning).length;
           
-          const todayStr = new Date().toLocaleDateString('ko-KR', { weekday: 'short', month: 'short', day: 'numeric' });
+          const todayStr = formatKoDate();
           const todayCompleted = userRuns.some(r => r.date === todayStr);
 
           let lastDistance = 0;
@@ -1733,7 +1778,7 @@
       };
 
       const handleResetAllData = async () => {
-        if (!window.confirm("⚠️ 경고: 모든 러닝 인증 내역(runs 테이블)을 삭제하고 크루원들의 주간 통계(morning_runs, total_runs, today_completed 등)를 0으로 초기화하시겠습니까?")) {
+        if (!window.confirm("⚠️ 경고: 모든 러닝 인증 내역(runs 테이블) 및 히스토리 피드를 삭제하고 크루원들의 주간 통계(morning_runs, total_runs, today_completed 등)를 0으로 초기화하시겠습니까?")) {
           return;
         }
         if (!window.confirm("⚠️ 마지막 경고: 이 작업은 절대 되돌릴 수 없습니다. 정말로 진행하시겠습니까?")) {
@@ -1765,7 +1810,14 @@
             .neq('id', 0);
           if (resetMembersError) throw resetMembersError;
           
-          // 3. Write a reset event log in audit_logs
+          // 3. Delete all audit logs
+          const { error: deleteLogsError } = await supabaseClient
+            .from('audit_logs')
+            .delete()
+            .neq('id', 0);
+          if (deleteLogsError) throw deleteLogsError;
+          
+          // 4. Write a new reset event log in audit_logs
           const logDetails = `${currentUser.name}님이 모든 러닝 인증 내역 및 주간 통계를 초기화(리셋)했습니다.`;
           const { error: logError } = await supabaseClient
             .from('audit_logs')
@@ -1777,7 +1829,7 @@
             }]);
           if (logError) console.error("Reset audit log error:", logError);
           
-          alert("✅ 모든 인증 데이터와 주간 통계가 성공적으로 초기화되었습니다!");
+          alert("✅ 모든 인증 데이터, 히스토리 피드 및 주간 통계가 성공적으로 초기화되었습니다!");
           await fetchData();
         } catch (err) {
           console.error("Reset all data error:", err);
