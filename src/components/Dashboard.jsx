@@ -25,8 +25,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [showModal, setShowModal] = useState(false);
   const [uploadFile, setUploadFile] = useState(null);
   const [timeOfDay, setTimeOfDay] = useState("morning"); // "morning" or "afternoon"
-  const [runDistance, setRunDistance] = useState("5.2"); // Default valid distance
-  const [runDuration, setRunDuration] = useState("35"); // Default valid duration
+  const [runDistance, setRunDistance] = useState(""); // Empty default for direct typing
+  const [runDuration, setRunDuration] = useState(""); // Empty default for direct typing
   const [runDate, setRunDate] = useState(() => {
     const today = new Date();
     const offset = today.getTimezoneOffset();
@@ -43,6 +43,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       const offset = today.getTimezoneOffset();
       const localToday = new Date(today.getTime() - (offset * 60 * 1000));
       setRunDate(localToday.toISOString().split('T')[0]);
+      setRunDistance("");
+      setRunDuration("");
       
       const currentHour = today.getHours();
       if (currentHour >= 5 && currentHour < 9) {
@@ -420,6 +422,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                       step="0.1" 
                       value={runDistance} 
                       onChange={(e) => setRunDistance(e.target.value)}
+                      placeholder="예: 5.0"
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
                     />
                     <span className="absolute right-3 top-2 text-xs text-slate-500">km</span>
@@ -444,6 +447,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                       type="number" 
                       value={runDuration} 
                       onChange={(e) => setRunDuration(e.target.value)}
+                      placeholder="예: 30"
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
                     />
                     <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
