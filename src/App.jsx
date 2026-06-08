@@ -43,8 +43,24 @@ export default function App() {
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberAvatar, setNewMemberAvatar] = useState('🏃‍♂️');
 
+  const [currentDateStr, setCurrentDateStr] = useState(() => formatKoDate());
+
   useEffect(() => {
     fetchData();
+  }, [currentDateStr]);
+
+  // Periodically check if the date has changed (e.g., past midnight) to auto-reset/refresh
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const freshDateStr = formatKoDate();
+      setCurrentDateStr(prev => {
+        if (prev !== freshDateStr) {
+          return freshDateStr;
+        }
+        return prev;
+      });
+    }, 10000); // Check every 10 seconds
+    return () => clearInterval(interval);
   }, []);
 
   // Force show profile selector if no user is selected

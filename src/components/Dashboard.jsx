@@ -36,6 +36,23 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isUrgent, setIsUrgent] = useState(false);
 
+  // When modal is opened, dynamically reset default upload date and activity time based on the actual current time
+  useEffect(() => {
+    if (showModal) {
+      const today = new Date();
+      const offset = today.getTimezoneOffset();
+      const localToday = new Date(today.getTime() - (offset * 60 * 1000));
+      setRunDate(localToday.toISOString().split('T')[0]);
+      
+      const currentHour = today.getHours();
+      if (currentHour >= 5 && currentHour < 9) {
+        setTimeOfDay('morning');
+      } else {
+        setTimeOfDay('afternoon');
+      }
+    }
+  }, [showModal]);
+
   // Countdown timer calculation to next Friday 12:00 PM (Noon)
   useEffect(() => {
     const calculateTimeLeft = () => {
