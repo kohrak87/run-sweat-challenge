@@ -36,93 +36,123 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isUrgent, setIsUrgent] = useState(false);
 
-  // Gemini API states
-  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('run_sweat_gemini_api_key') || '');
+  // OCR analysis states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [aiDetected, setAiDetected] = useState(false);
 
-  const analyzeImageWithGemini = async (file) => {
-    const apiKey = localStorage.getItem('run_sweat_gemini_api_key');
-    if (!apiKey) return;
+  const loadTesseract = () => {
+    return new Promise((resolve, reject) => {
+      if (window.Tesseract) {
+        resolve(window.Tesseract);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/tesseract.js@5.0.5/dist/tesseract.min.js';
+      script.onload = () => resolve(window.Tesseract);
+      script.onerror = (err) => reject(new Error('Tesseract OCR 엔진 로드 실패'));
+      document.head.appendChild(script);
+    });
+  };
 
+  const analyzeImageWithTesseract = async (file) => {
     setIsAnalyzing(true);
     setAnalysisError('');
     setAiDetected(false);
 
     try {
-      const dataUrl = await compressImage(file);
-      const mimeType = dataUrl.split(',')[0].split(';')[0].split(':')[1];
-      const base64Data = dataUrl.split(',')[1];
+      const Tesseract = await loadTesseract();
+      const result = await Tesseract.recognize(file, 'eng');
+      const rawText = result.data.text;
+      console.log("OCR Raw Text:", rawText);
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: "This is a workout/running stats screenshot from Garmin, Strava, Apple Fitness, Nike Run Club or similar app. Please extract the running statistics. Look for distance (in kilometers, e.g. 5.12), duration (in minutes, e.g. 32.5 or 30:00), activity start time (e.g. 06:15 or 18:30) and date of the activity (if visible, in YYYY-MM-DD format). If date is not visible, return null for date. If start time is classified as between 05:00 and 09:00, classify time_of_day as 'morning', otherwise 'afternoon'. Convert hh:mm:ss duration format into decimal minutes (e.g. '01:05:30' -> 65.5). Return ONLY a raw JSON object with the following keys: 'distance' (number), 'duration' (number), 'date' (string, YYYY-MM-DD or null), 'time_of_day' (string, 'morning' or 'afternoon'). No markdown block code, no backticks, no other text."
-                },
-                {
-                  inlineData: {
-                    mimeType: mimeType,
-                    data: base64Data
-                  }
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        })
+      if (!rawText || rawText.trim().length === 0) {
+        throw new Error("이미지에서 텍스트를 판독하지 못했습니다.");
+      }
+
+      let distance = null;
+      let duration = null;
+      let timeOfDayVal = 'afternoon';
+
+      // 1. 거리 파싱 (소수점 km 또는 정수+km 등)
+      const kmMatches = rawText.match(/(\d+\.\d+)\s*(?:km|k|m|ki|mi)?/gi) || [];
+      const integerKmMatches = rawText.match(/(\d+)\s*(?:km|kilometers|kilometer)/gi) || [];
+      
+      let distCandidates = [];
+      kmMatches.forEach(m => {
+        const val = parseFloat(m.replace(/[^\d.]/g, ''));
+        if (!isNaN(val) && val > 0 && val < 100) distCandidates.push(val);
+      });
+      integerKmMatches.forEach(m => {
+        const val = parseFloat(m.replace(/[^\d.]/g, ''));
+        if (!isNaN(val) && val > 0 && val < 100) distCandidates.push(val);
       });
 
-      if (!response.ok) {
-        let errorMsg = `API 오류: ${response.status} ${response.statusText}`;
-        try {
-          const errJson = await response.json();
-          if (errJson.error && errJson.error.message) {
-            errorMsg = `API 오류 (${response.status}): ${errJson.error.message}`;
-          }
-        } catch (_) {}
-        throw new Error(errorMsg);
+      if (distCandidates.length > 0) {
+        const sensibleDists = distCandidates.filter(d => d >= 1.0 && d <= 50.0);
+        distance = sensibleDists.length > 0 ? sensibleDists[0] : distCandidates[0];
       }
 
-      const resData = await response.json();
-      const resultText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!resultText) {
-        throw new Error("분석 결과를 받지 못했습니다. 올바른 스크린샷 이미지인지 확인해 주세요.");
+      // 2. 시간 파싱 (hh:mm:ss 또는 mm:ss 또는 XX분 등)
+      const timeMatches = rawText.match(/(\d{1,2}):(\d{2}):(\d{2})/g) || [];
+      const minSecMatches = rawText.match(/(?:\s|^)(\d{1,2}):(\d{2})(?:\s|$)/g) || [];
+      const textMinMatches = rawText.match(/(\d+)\s*(?:min|minute|minutes|분)/gi) || [];
+
+      let durCandidates = [];
+      timeMatches.forEach(m => {
+        const parts = m.split(':');
+        const total = parseInt(parts[0]) * 60 + parseInt(parts[1]) + parseInt(parts[2]) / 60;
+        if (total > 5 && total < 300) durCandidates.push(total);
+      });
+      if (durCandidates.length === 0) {
+        minSecMatches.forEach(m => {
+          const parts = m.trim().split(':');
+          const total = parseInt(parts[0]) + parseInt(parts[1]) / 65;
+          if (total > 5 && total < 300) durCandidates.push(total);
+        });
+      }
+      if (durCandidates.length === 0) {
+        textMinMatches.forEach(m => {
+          const val = parseInt(m.replace(/[^\d]/g, ''));
+          if (!isNaN(val) && val > 5 && val < 300) durCandidates.push(val);
+        });
       }
 
-      let cleanText = resultText.trim();
-      if (cleanText.startsWith("```")) {
-        cleanText = cleanText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+      if (durCandidates.length > 0) {
+        duration = Math.round(durCandidates[0]);
       }
 
-      const parsed = JSON.parse(cleanText);
+      // 3. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
+      const isMorningText = /am|오전|morning/i.test(rawText);
+      const timeOfDayMatches = rawText.match(/(?:[0-2]?\d):(?:[0-5]\d)/g) || [];
+      let hasMorningHour = false;
+      timeOfDayMatches.forEach(t => {
+        const hour = parseInt(t.split(':')[0]);
+        if (hour >= 5 && hour < 9) hasMorningHour = true;
+      });
 
-      if (parsed.distance) {
-        setRunDistance(String(parsed.distance));
+      if (isMorningText || hasMorningHour) {
+        timeOfDayVal = 'morning';
       }
-      if (parsed.duration) {
-        setRunDuration(String(Math.round(parsed.duration)));
+
+      let detected = false;
+      if (distance) {
+        setRunDistance(String(distance.toFixed(2)));
+        detected = true;
       }
-      if (parsed.date) {
-        if (/^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) {
-          setRunDate(parsed.date);
-        }
+      if (duration) {
+        setRunDuration(String(duration));
+        detected = true;
       }
-      if (parsed.time_of_day) {
-        setTimeOfDay(parsed.time_of_day);
+      setTimeOfDay(timeOfDayVal);
+
+      if (detected) {
+        setAiDetected(true);
+      } else {
+        throw new Error("이미지에서 달리기 거리(km) 또는 시간(분)을 추출하지 못했습니다. 아래 폼에서 수동 기입 후 등록해 주세요.");
       }
-      setAiDetected(true);
     } catch (err) {
-      console.error("Gemini image analysis error:", err);
+      console.error("OCR analysis error:", err);
       setAnalysisError(err.message || "이미지 분석 도중 오류가 발생했습니다.");
     } finally {
       setIsAnalyzing(false);
@@ -150,7 +180,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       setAnalysisError('');
 
       if (uploadFile) {
-        analyzeImageWithGemini(uploadFile);
+        analyzeImageWithTesseract(uploadFile);
       }
     }
   }, [showModal]);
@@ -485,91 +515,20 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                 <p className="font-mono text-xs font-semibold text-brand-cyan truncate">{uploadFile?.name}</p>
               </div>
 
-              {/* Gemini AI Status Box */}
-              {!localStorage.getItem('run_sweat_gemini_api_key') ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
-                  <p className="text-slate-200 font-bold flex items-center gap-1 font-inter">
-                    💡 <span className="text-brand-neon">AI 자동 데이터 인식 사용</span>
-                  </p>
-                  <div className="text-[11px] text-slate-400 leading-relaxed space-y-1">
-                    <p>
-                      가민/스트라바 캡처 이미지에서 거리, 시간, 날짜를 자동으로 추출하기 위해 <strong>Google Gemini API Key</strong>가 사용됩니다.
-                    </p>
-                    <p className="bg-slate-950 p-2 rounded border border-slate-850 mt-1">
-                      🔑 <strong>API 키 무료 발급처:</strong><br />
-                      <a 
-                        href="https://aistudio.google.com/" 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="text-brand-cyan hover:text-brand-neon underline font-bold inline-block mt-0.5"
-                      >
-                        👉 Google AI Studio (클릭해서 이동)
-                      </a>
-                      <span className="block text-[10px] text-slate-500 mt-0.5">
-                        (접속 후 구글 로그인 → <strong>Get API key</strong> 클릭 → <strong>Create API key</strong> 생성)
-                      </span>
-                    </p>
-                    <p className="text-[10px] text-slate-500 pt-1">
-                      ※ 키는 본인 브라우저(localStorage)에만 저장되므로 서버로 유출되지 않아 안전합니다.
-                    </p>
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    <input
-                      type="password"
-                      value={geminiApiKey}
-                      onChange={(e) => setGeminiApiKey(e.target.value)}
-                      placeholder="API Key 입력 (AI-zaSy...)"
-                      className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-brand-cyan font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const cleanKey = geminiApiKey.trim();
-                        if (!cleanKey) {
-                          alert("API 키를 입력해 주세요.");
-                          return;
-                        }
-                        if (cleanKey.includes('...') || cleanKey.length < 25) {
-                          alert("⚠️ 올바른 API 키 형식이 아닙니다!\n화면에 생략되어 보이는 '...xZ6Q' 텍스트를 복사한 것이 아닌지 확인해 주세요.\n\n오른쪽에 위치한 '복사(Copy)' 아이콘을 눌러 전체 키를 다시 복사해서 입력해 주세요.");
-                          return;
-                        }
-                         // 접두사 검사는 제거하고 길이 및 마스킹 검사만 유지합니다.
-                        localStorage.setItem('run_sweat_gemini_api_key', cleanKey);
-                        analyzeImageWithGemini(uploadFile);
-                      }}
-                      className="bg-brand-cyan/20 border border-brand-cyan/40 hover:bg-brand-cyan/35 text-brand-cyan text-xs font-bold px-3 py-1.5 rounded-lg transition"
-                    >
-                      등록 & 분석
-                    </button>
-                  </div>
-                </div>
-              ) : isAnalyzing ? (
+              {/* Tesseract OCR AI Status Box */}
+              {isAnalyzing ? (
                 <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 flex flex-col items-center justify-center text-center space-y-2">
                   <div className="w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin" />
                   <div>
-                    <p className="text-xs text-slate-200 font-bold">Gemini AI가 스크린샷 분석 중...</p>
-                    <p className="text-[10px] text-slate-500 mt-1">거리, 시간, 날짜 데이터를 파싱하고 있습니다.</p>
+                    <p className="text-xs text-slate-200 font-bold">인공지능 이미지 분석 엔진 동작 중...</p>
+                    <p className="text-[10px] text-slate-500 mt-1">스크린샷 속 달리기 거리, 시간 정보를 판독하고 있습니다.</p>
                   </div>
                 </div>
               ) : aiDetected ? (
                 <div className="bg-brand-neon/5 border border-brand-neon/20 rounded-xl p-3 text-xs flex justify-between items-center animate-pulse">
                   <span className="text-brand-neon font-medium flex items-center gap-1.5">
-                    ✅ AI 분석 성공! 데이터가 자동 입력되었습니다.
+                    ✅ AI 이미지 분석 성공! 판독 데이터가 자동 입력되었습니다.
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const clear = window.confirm("등록된 API 키를 삭제하시겠습니까?");
-                      if (clear) {
-                        localStorage.removeItem('run_sweat_gemini_api_key');
-                        setGeminiApiKey('');
-                        setAiDetected(false);
-                      }
-                    }}
-                    className="text-[10px] text-slate-500 hover:text-slate-400 underline font-semibold"
-                  >
-                    API 키 삭제
-                  </button>
                 </div>
               ) : analysisError ? (
                 <div className="bg-brand-red/5 border border-brand-red/20 rounded-xl p-3 text-xs space-y-1.5">
@@ -578,28 +537,18 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                   <div className="flex gap-2 justify-end pt-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        const clear = window.confirm("등록된 API 키를 삭제하시겠습니까?");
-                        if (clear) {
-                          localStorage.removeItem('run_sweat_gemini_api_key');
-                          setGeminiApiKey('');
-                          setAnalysisError('');
-                        }
-                      }}
-                      className="text-[10px] text-slate-500 hover:text-slate-400 underline font-semibold"
-                    >
-                      API 키 변경
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => analyzeImageWithGemini(uploadFile)}
+                      onClick={() => analyzeImageWithTesseract(uploadFile)}
                       className="text-[10px] text-brand-cyan hover:underline font-bold"
                     >
                       재시도
                     </button>
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 text-center text-xs text-slate-400">
+                  이미지 분석을 대기 중입니다.
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
