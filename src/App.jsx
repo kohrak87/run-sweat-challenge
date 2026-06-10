@@ -340,10 +340,13 @@ export default function App() {
         .select('*')
         .eq('id', numericId)
         .single();
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        alert("인증 기록 조회 실패: " + fetchError.message);
+        throw fetchError;
+      }
 
       // 2. Update the run
-      const { error: updateError } = await supabase
+      const { data: updatedRuns, error: updateError } = await supabase
         .from('runs')
         .update({
           distance: updatedData.distance,
@@ -352,8 +355,12 @@ export default function App() {
           date: updatedData.date,
           is_morning: updatedData.isMorning
         })
-        .eq('id', numericId);
-      if (updateError) throw updateError;
+        .eq('id', numericId)
+        .select();
+      if (updateError) {
+        alert("인증 기록 수정 쿼리 실패: " + updateError.message);
+        throw updateError;
+      }
 
       // 3. Generate description of changes
       const changes = [];
@@ -390,9 +397,10 @@ export default function App() {
       await recalculateMemberStats(oldRun.name);
 
       await fetchData();
+      alert("✅ 수정이 성공적으로 완료되었습니다!");
     } catch (err) {
       console.error("Edit run error:", err);
-      alert("인증 수정 중 오류가 발생했습니다: " + err.message);
+      alert("인증 수정 중 최종 오류가 발생했습니다: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -411,14 +419,28 @@ export default function App() {
         .select('*')
         .eq('id', numericId)
         .single();
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        alert("인증 기록 조회 실패: " + fetchError.message);
+        throw fetchError;
+      }
+      if (!runToDelete) {
+        alert("삭제할 인증 기록을 DB에서 찾을 수 없습니다. (ID: " + numericId + ")");
+        return;
+      }
 
       // 2. Delete the run
-      const { error: deleteError } = await supabase
+      const { data: deletedData, error: deleteError } = await supabase
         .from('runs')
         .delete()
-        .eq('id', numericId);
-      if (deleteError) throw deleteError;
+        .eq('id', numericId)
+        .select();
+      if (deleteError) {
+        alert("인증 기록 삭제 쿼리 실패: " + deleteError.message);
+        throw deleteError;
+      }
+      if (!deletedData || deletedData.length === 0) {
+        alert("⚠️ 경고: 실제로 삭제된 데이터가 0건입니다. (이미 삭제되었거나 권한 오류일 수 있습니다.)");
+      }
 
       // 3. Write deletion log in audit_logs
       const logDetails = `${currentUser.name}님이 ${runToDelete.name}님의 ${runToDelete.date} 인증을 삭제함 (거리: ${runToDelete.distance}km, 시간: ${runToDelete.duration}분, ${runToDelete.time})`;
@@ -436,9 +458,10 @@ export default function App() {
       await recalculateMemberStats(runToDelete.name);
 
       await fetchData();
+      alert("✅ 삭제가 성공적으로 완료되었습니다!");
     } catch (err) {
       console.error("Delete run error:", err);
-      alert("인증 삭제 중 오류가 발생했습니다: " + err.message);
+      alert("인증 삭제 중 최종 오류가 발생했습니다: " + err.message);
     } finally {
       setLoading(false);
     }
