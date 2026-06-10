@@ -521,10 +521,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                           alert("⚠️ 올바른 API 키 형식이 아닙니다!\n화면에 생략되어 보이는 '...xZ6Q' 텍스트를 복사한 것이 아닌지 확인해 주세요.\n\n오른쪽에 위치한 '복사(Copy)' 아이콘을 눌러 전체 키를 다시 복사해서 입력해 주세요.");
                           return;
                         }
-                        if (!cleanKey.startsWith('AIza')) {
-                          alert(`⚠️ 입력하신 텍스트는 올바른 Google API 키 형식이 아닙니다.\n\n• Google Gemini API 키는 반드시 'AIza'로 시작해야 합니다.\n• 입력한 값의 시작 부분: '${cleanKey.substring(0, 6)}...'\n\nGoogle AI Studio에서 발급받은 실제 API 키 전체가 올바르게 복사되었는지 확인해 주세요.`);
-                          return;
-                        }
+                         // 접두사 검사는 제거하고 길이 및 마스킹 검사만 유지합니다.
                         localStorage.setItem('run_sweat_gemini_api_key', cleanKey);
                         analyzeImageWithGemini(uploadFile);
                       }}
