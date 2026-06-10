@@ -55,7 +55,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       const mimeType = dataUrl.split(',')[0].split(';')[0].split(':')[1];
       const base64Data = dataUrl.split(',')[1];
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -75,7 +75,10 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                 }
               ]
             }
-          ]
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
         })
       });
 
