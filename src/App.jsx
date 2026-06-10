@@ -333,11 +333,12 @@ export default function App() {
   const handleEditRun = async (runId, updatedData) => {
     try {
       setLoading(true);
+      const numericId = Number(runId);
       // 1. Fetch the old run to know the original details
       const { data: oldRun, error: fetchError } = await supabase
         .from('runs')
         .select('*')
-        .eq('id', runId)
+        .eq('id', numericId)
         .single();
       if (fetchError) throw fetchError;
 
@@ -351,7 +352,7 @@ export default function App() {
           date: updatedData.date,
           is_morning: updatedData.isMorning
         })
-        .eq('id', runId);
+        .eq('id', numericId);
       if (updateError) throw updateError;
 
       // 3. Generate description of changes
@@ -403,11 +404,12 @@ export default function App() {
     }
     try {
       setLoading(true);
+      const numericId = Number(runId);
       // 1. Fetch the run to know the runner and stats
       const { data: runToDelete, error: fetchError } = await supabase
         .from('runs')
         .select('*')
-        .eq('id', runId)
+        .eq('id', numericId)
         .single();
       if (fetchError) throw fetchError;
 
@@ -415,7 +417,7 @@ export default function App() {
       const { error: deleteError } = await supabase
         .from('runs')
         .delete()
-        .eq('id', runId);
+        .eq('id', numericId);
       if (deleteError) throw deleteError;
 
       // 3. Write deletion log in audit_logs
