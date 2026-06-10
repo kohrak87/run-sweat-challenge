@@ -83,7 +83,14 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       });
 
       if (!response.ok) {
-        throw new Error(`API 오류: ${response.status} ${response.statusText}`);
+        let errorMsg = `API 오류: ${response.status} ${response.statusText}`;
+        try {
+          const errJson = await response.json();
+          if (errJson.error && errJson.error.message) {
+            errorMsg = `API 오류 (${response.status}): ${errJson.error.message}`;
+          }
+        } catch (_) {}
+        throw new Error(errorMsg);
       }
 
       const resData = await response.json();
