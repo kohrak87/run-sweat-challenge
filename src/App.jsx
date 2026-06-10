@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import RaceBoard from './components/RaceBoard';
+import HistoryList from './components/HistoryList';
 import AdminPanel from './components/AdminPanel';
 import { supabase } from './supabaseClient';
 import { Sparkles, Activity, FileText, Loader2, User, Check, Settings } from 'lucide-react';
@@ -146,7 +147,8 @@ export default function App() {
         time: r.time,
         date: r.date,
         isMorning: r.is_morning,
-        imageUrl: r.image_url
+        imageUrl: r.image_url,
+        createdAt: r.created_at
       }));
       setHistories(mappedRuns);
 
@@ -647,6 +649,12 @@ export default function App() {
             벌금 레이스 현황
           </button>
           <button 
+            onClick={() => setActiveTab('feed')}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'feed' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+          >
+            인증 피드
+          </button>
+          <button 
             onClick={() => setActiveTab('rules')}
             className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'rules' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
@@ -680,6 +688,16 @@ export default function App() {
 
             {activeTab === 'race' && (
               <RaceBoard members={members} currentUserId={currentUserId} />
+            )}
+
+            {activeTab === 'feed' && (
+              <HistoryList 
+                histories={histories} 
+                onDeleteRun={handleDeleteRun} 
+                onEditRun={handleEditRun}
+                auditLogs={auditLogs}
+                isAdminUnlocked={isAdminUnlocked}
+              />
             )}
 
             {activeTab === 'admin' && (
