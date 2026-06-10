@@ -361,6 +361,10 @@ export default function App() {
         alert("인증 기록 수정 쿼리 실패: " + updateError.message);
         throw updateError;
       }
+      if (!updatedRuns || updatedRuns.length === 0) {
+        alert("⚠️ 경고: 실제로 수정된 데이터가 0건입니다. (이미 수정되었거나 권한 오류일 수 있습니다.)\nSupabase RLS(보안 정책) 설정 또는 테이블의 수정 권한을 확인해주세요.");
+        return;
+      }
 
       // 3. Generate description of changes
       const changes = [];
@@ -439,7 +443,8 @@ export default function App() {
         throw deleteError;
       }
       if (!deletedData || deletedData.length === 0) {
-        alert("⚠️ 경고: 실제로 삭제된 데이터가 0건입니다. (이미 삭제되었거나 권한 오류일 수 있습니다.)");
+        alert("⚠️ 경고: 실제로 삭제된 데이터가 0건입니다. (이미 삭제되었거나 권한 오류일 수 있습니다.)\nSupabase RLS(보안 정책) 설정 또는 테이블의 삭제 권한을 확인해주세요.");
+        return;
       }
 
       // 3. Write deletion log in audit_logs
