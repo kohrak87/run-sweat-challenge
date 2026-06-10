@@ -75,10 +75,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                 }
               ]
             }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
+          ]
         })
       });
 
@@ -99,7 +96,12 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         throw new Error("분석 결과를 받지 못했습니다. 올바른 스크린샷 이미지인지 확인해 주세요.");
       }
 
-      const parsed = JSON.parse(resultText.trim());
+      let cleanText = resultText.trim();
+      if (cleanText.startsWith("```")) {
+        cleanText = cleanText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+      }
+
+      const parsed = JSON.parse(cleanText);
 
       if (parsed.distance) {
         setRunDistance(String(parsed.distance));
