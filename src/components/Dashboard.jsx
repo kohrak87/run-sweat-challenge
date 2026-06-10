@@ -55,7 +55,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       const mimeType = dataUrl.split(',')[0].split(';')[0].split(':')[1];
       const base64Data = dataUrl.split(',')[1];
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -512,12 +512,21 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                     <button
                       type="button"
                       onClick={() => {
-                        if (geminiApiKey.trim()) {
-                          localStorage.setItem('run_sweat_gemini_api_key', geminiApiKey.trim());
-                          analyzeImageWithGemini(uploadFile);
-                        } else {
+                        const cleanKey = geminiApiKey.trim();
+                        if (!cleanKey) {
                           alert("API 키를 입력해 주세요.");
+                          return;
                         }
+                        if (cleanKey.includes('...') || cleanKey.length < 25) {
+                          alert("⚠️ 올바른 API 키 형식이 아닙니다!\n화면에 생략되어 보이는 '...xZ6Q' 텍스트를 복사한 것이 아닌지 확인해 주세요.\n\n오른쪽에 위치한 '복사(Copy)' 아이콘을 눌러 전체 키를 다시 복사해서 입력해 주세요.");
+                          return;
+                        }
+                        if (!cleanKey.startsWith('AIzaSy')) {
+                          alert("⚠️ Google Gemini API 키는 보통 'AIzaSy'로 시작합니다. 올바른 키인지 다시 확인해 주세요.");
+                          return;
+                        }
+                        localStorage.setItem('run_sweat_gemini_api_key', cleanKey);
+                        analyzeImageWithGemini(uploadFile);
                       }}
                       className="bg-brand-cyan/20 border border-brand-cyan/40 hover:bg-brand-cyan/35 text-brand-cyan text-xs font-bold px-3 py-1.5 rounded-lg transition"
                     >
