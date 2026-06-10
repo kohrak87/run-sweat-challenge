@@ -36,6 +36,87 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isUrgent, setIsUrgent] = useState(false);
 
+  // Gemini API states
+  const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('run_sweat_gemini_api_key') || '');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState('');
+  const [aiDetected, setAiDetected] = useState(false);
+
+  const analyzeImageWithGemini = async (file) => {
+    const apiKey = localStorage.getItem('run_sweat_gemini_api_key');
+    if (!apiKey) return;
+
+    setIsAnalyzing(true);
+    setAnalysisError('');
+    setAiDetected(false);
+
+    try {
+      const dataUrl = await compressImage(file);
+      const mimeType = dataUrl.split(',')[0].split(';')[0].split(':')[1];
+      const base64Data = dataUrl.split(',')[1];
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: "This is a workout/running stats screenshot from Garmin, Strava, Apple Fitness, Nike Run Club or similar app. Please extract the running statistics. Look for distance (in kilometers, e.g. 5.12), duration (in minutes, e.g. 32.5 or 30:00), activity start time (e.g. 06:15 or 18:30) and date of the activity (if visible, in YYYY-MM-DD format). If date is not visible, return null for date. If start time is classified as between 05:00 and 09:00, classify time_of_day as 'morning', otherwise 'afternoon'. Convert hh:mm:ss duration format into decimal minutes (e.g. '01:05:30' -> 65.5). Return ONLY a raw JSON object with the following keys: 'distance' (number), 'duration' (number), 'date' (string, YYYY-MM-DD or null), 'time_of_day' (string, 'morning' or 'afternoon'). No markdown block code, no backticks, no other text."
+                },
+                {
+                  inlineData: {
+                    mimeType: mimeType,
+                    data: base64Data
+                  }
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API 오류: ${response.status} ${response.statusText}`);
+      }
+
+      const resData = await response.json();
+      const resultText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!resultText) {
+        throw new Error("분석 결과를 받지 못했습니다. 올바른 스크린샷 이미지인지 확인해 주세요.");
+      }
+
+      const parsed = JSON.parse(resultText.trim());
+
+      if (parsed.distance) {
+        setRunDistance(String(parsed.distance));
+      }
+      if (parsed.duration) {
+        setRunDuration(String(Math.round(parsed.duration)));
+      }
+      if (parsed.date) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) {
+          setRunDate(parsed.date);
+        }
+      }
+      if (parsed.time_of_day) {
+        setTimeOfDay(parsed.time_of_day);
+      }
+      setAiDetected(true);
+    } catch (err) {
+      console.error("Gemini image analysis error:", err);
+      setAnalysisError(err.message || "이미지 분석 도중 오류가 발생했습니다.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   // When modal is opened, dynamically reset default upload date and activity time based on the actual current time
   useEffect(() => {
     if (showModal) {
@@ -51,6 +132,13 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         setTimeOfDay('morning');
       } else {
         setTimeOfDay('afternoon');
+      }
+
+      setAiDetected(false);
+      setAnalysisError('');
+
+      if (uploadFile) {
+        analyzeImageWithGemini(uploadFile);
       }
     }
   }, [showModal]);
@@ -373,17 +461,108 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       {/* 인증 분석 수동 확인 모달 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
             <h3 className="font-extrabold text-xl text-white mb-4 flex items-center gap-2">
-              <Activity className="text-brand-cyan" /> 🔍 가인/스트라바 AI 분석 결과
+              <Activity className="text-brand-cyan" /> 🔍 가민/스트라바 AI 분석 결과
             </h3>
             
             <div className="space-y-4 mb-6">
-              <div className="border border-slate-700 bg-slate-800/50 rounded-xl p-4 text-center">
-                <p className="text-xs text-slate-400 mb-1">업로드된 파일</p>
-                <p className="font-mono text-sm font-semibold text-brand-cyan truncate">{uploadFile?.name}</p>
+              <div className="border border-slate-750 bg-slate-800/50 rounded-xl p-3.5 text-center">
+                <p className="text-[10px] text-slate-500 mb-1 font-semibold uppercase tracking-wider">업로드된 파일</p>
+                <p className="font-mono text-xs font-semibold text-brand-cyan truncate">{uploadFile?.name}</p>
               </div>
+
+              {/* Gemini AI Status Box */}
+              {!localStorage.getItem('run_sweat_gemini_api_key') ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
+                  <p className="text-slate-200 font-bold flex items-center gap-1 font-inter">
+                    💡 <span className="text-brand-neon">AI 자동 채우기 사용</span>
+                  </p>
+                  <p className="text-[11px] text-slate-400 leading-normal">
+                    Gemini API 키를 등록하면 스크린샷 속의 거리, 시간, 날짜를 AI가 자동으로 인식해 채워줍니다. 키는 본인 브라우저(`localStorage`)에만 저장되어 안전합니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={geminiApiKey}
+                      onChange={(e) => setGeminiApiKey(e.target.value)}
+                      placeholder="API Key 입력 (AI-zaSy...)"
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-brand-cyan font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (geminiApiKey.trim()) {
+                          localStorage.setItem('run_sweat_gemini_api_key', geminiApiKey.trim());
+                          analyzeImageWithGemini(uploadFile);
+                        } else {
+                          alert("API 키를 입력해 주세요.");
+                        }
+                      }}
+                      className="bg-brand-cyan/20 border border-brand-cyan/40 hover:bg-brand-cyan/35 text-brand-cyan text-xs font-bold px-3 py-1.5 rounded-lg transition"
+                    >
+                      등록 & 분석
+                    </button>
+                  </div>
+                </div>
+              ) : isAnalyzing ? (
+                <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5 flex flex-col items-center justify-center text-center space-y-2">
+                  <div className="w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin" />
+                  <div>
+                    <p className="text-xs text-slate-200 font-bold">Gemini AI가 스크린샷 분석 중...</p>
+                    <p className="text-[10px] text-slate-500 mt-1">거리, 시간, 날짜 데이터를 파싱하고 있습니다.</p>
+                  </div>
+                </div>
+              ) : aiDetected ? (
+                <div className="bg-brand-neon/5 border border-brand-neon/20 rounded-xl p-3 text-xs flex justify-between items-center animate-pulse">
+                  <span className="text-brand-neon font-medium flex items-center gap-1.5">
+                    ✅ AI 분석 성공! 데이터가 자동 입력되었습니다.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clear = window.confirm("등록된 API 키를 삭제하시겠습니까?");
+                      if (clear) {
+                        localStorage.removeItem('run_sweat_gemini_api_key');
+                        setGeminiApiKey('');
+                        setAiDetected(false);
+                      }
+                    }}
+                    className="text-[10px] text-slate-500 hover:text-slate-400 underline font-semibold"
+                  >
+                    API 키 삭제
+                  </button>
+                </div>
+              ) : analysisError ? (
+                <div className="bg-brand-red/5 border border-brand-red/20 rounded-xl p-3 text-xs space-y-1.5">
+                  <p className="text-brand-red font-medium">⚠️ AI 분석 실패 (수동 입력 가능)</p>
+                  <p className="text-[10px] text-slate-400 leading-normal">{analysisError}</p>
+                  <div className="flex gap-2 justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const clear = window.confirm("등록된 API 키를 삭제하시겠습니까?");
+                        if (clear) {
+                          localStorage.removeItem('run_sweat_gemini_api_key');
+                          setGeminiApiKey('');
+                          setAnalysisError('');
+                        }
+                      }}
+                      className="text-[10px] text-slate-500 hover:text-slate-400 underline font-semibold"
+                    >
+                      API 키 변경
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => analyzeImageWithGemini(uploadFile)}
+                      className="text-[10px] text-brand-cyan hover:underline font-bold"
+                    >
+                      재시도
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -423,9 +602,9 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                       value={runDistance} 
                       onChange={(e) => setRunDistance(e.target.value)}
                       placeholder="예: 5.0"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8 font-semibold text-white font-mono"
                     />
-                    <span className="absolute right-3 top-2 text-xs text-slate-500">km</span>
+                    <span className="absolute right-3 top-2 text-xs text-slate-500 font-mono">km</span>
                   </div>
                 </div>
               </div>
@@ -437,7 +616,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                     type="date" 
                     value={runDate} 
                     onChange={(e) => setRunDate(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-mono"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-mono font-semibold"
                   />
                 </div>
                 <div>
@@ -448,9 +627,9 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                       value={runDuration} 
                       onChange={(e) => setRunDuration(e.target.value)}
                       placeholder="예: 30"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-sm focus:border-brand-cyan focus:outline-none pr-8 font-semibold text-white font-mono"
                     />
-                    <span className="absolute right-3 top-2 text-xs text-slate-500">분</span>
+                    <span className="absolute right-3 top-2 text-xs text-slate-500 font-mono">분</span>
                   </div>
                 </div>
               </div>

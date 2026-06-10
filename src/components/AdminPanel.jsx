@@ -10,7 +10,8 @@ export default function AdminPanel({
   onDeleteRun, 
   onEditRun,
   members,
-  onRenameMember
+  onRenameMember,
+  onUpdatePassword
 }) {
   const [passcode, setPasscode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -19,6 +20,18 @@ export default function AdminPanel({
     const newName = window.prompt(`'${member.name}' 크루원의 새 이름을 입력하세요:`, member.name);
     if (newName && newName.trim() && newName.trim() !== member.name) {
       onRenameMember(member.id, member.name, newName.trim());
+    }
+  };
+
+  const handlePromptUpdatePassword = (member) => {
+    const newPassword = window.prompt(`'${member.name}' 크루원의 새로운 2자리 비밀번호를 입력하세요:`, member.password || '00');
+    if (newPassword !== null) {
+      const trimmed = newPassword.trim();
+      if (trimmed.length !== 2 || isNaN(trimmed)) {
+        alert("비밀번호는 반드시 2자리 숫자여야 합니다!");
+        return;
+      }
+      onUpdatePassword(member.id, trimmed);
     }
   };
 
@@ -157,9 +170,9 @@ export default function AdminPanel({
           </div>
 
           <div className="glass-panel border-slate-800 rounded-2xl p-6 space-y-4">
-            <h3 className="font-bold text-sm text-white flex items-center gap-1.5">👥 크루원 이름 변경</h3>
+            <h3 className="font-bold text-sm text-white flex items-center gap-1.5">👥 크루원 정보 관리</h3>
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              크루원의 이름을 변경합니다. 기존 러닝 인증 기록과 통계 데이터의 이름도 함께 업데이트됩니다.
+              크루원의 이름과 2자리 로그인 비밀번호를 관리합니다.
             </p>
             
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
@@ -167,14 +180,27 @@ export default function AdminPanel({
                 <div key={m.id} className="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-900/60">
                   <div className="flex items-center gap-2">
                     <span className="text-base">{m.avatar}</span>
-                    <span className="text-xs font-semibold text-slate-200">{m.name}</span>
+                    <div>
+                      <span className="text-xs font-semibold text-slate-200 block">{m.name}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">비밀번호: <strong className="text-brand-cyan">{m.password || '00'}</strong></span>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => handlePromptRename(m)}
-                    className="text-[10px] bg-slate-850 hover:bg-brand-cyan/25 hover:text-brand-cyan text-slate-300 font-bold px-2 py-1 rounded transition border border-slate-800 hover:border-brand-cyan/30"
-                  >
-                    이름 변경
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => handlePromptRename(m)}
+                      className="text-[10px] bg-slate-850 hover:bg-brand-cyan/20 hover:text-brand-cyan text-slate-300 font-bold px-2 py-1 rounded transition border border-slate-800 hover:border-brand-cyan/30"
+                      title="이름 변경"
+                    >
+                      이름
+                    </button>
+                    <button
+                      onClick={() => handlePromptUpdatePassword(m)}
+                      className="text-[10px] bg-slate-850 hover:bg-brand-cyan/20 hover:text-brand-cyan text-slate-300 font-bold px-2 py-1 rounded transition border border-slate-800 hover:border-brand-cyan/30"
+                      title="비밀번호 변경"
+                    >
+                      비번
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

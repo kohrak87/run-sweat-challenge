@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS members (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   avatar TEXT,
+  password TEXT DEFAULT '00',
   morning_runs INTEGER DEFAULT 0,
   total_runs INTEGER DEFAULT 0,
   today_completed BOOLEAN DEFAULT FALSE,
@@ -33,14 +34,14 @@ ALTER TABLE runs DISABLE ROW LEVEL SECURITY;
 -- 4. 초기 크루 명단 데이터 삽입
 TRUNCATE TABLE members RESTART IDENTITY;
 
-INSERT INTO members (name, avatar, morning_runs, total_runs, today_completed, last_distance, last_duration, last_time, last_run_type, is_me) VALUES
-('복케이', '👑', 2, 3, false, 0, 0, '', '', true),
-('응삼', '🏃‍♂️', 3, 5, true, 6.2, 35, '06:15', 'morning', false),
-('원팔', '⚡️', 1, 2, false, 0, 0, '', '', false),
-('호씨', '🐢', 0, 1, false, 0, 0, '', '', false),
-('아잘', '🔥', 0, 0, false, 0, 0, '', '', false),
-('제프', '⚡️', 0, 0, false, 0, 0, '', '', false),
-('로키', '🐺', 0, 0, false, 0, 0, '', '', false);
+INSERT INTO members (name, avatar, password, morning_runs, total_runs, today_completed, last_distance, last_duration, last_time, last_run_type, is_me) VALUES
+('복케이', '👑', '00', 2, 3, false, 0, 0, '', '', true),
+('응삼', '🏃‍♂️', '00', 3, 5, true, 6.2, 35, '06:15', 'morning', false),
+('원팔', '⚡️', '00', 1, 2, false, 0, 0, '', '', false),
+('호씨', '🐢', '00', 0, 1, false, 0, 0, '', '', false),
+('아잘', '🔥', '00', 0, 0, false, 0, 0, '', '', false),
+('제프', '⚡️', '00', 0, 0, false, 0, 0, '', '', false),
+('로키', '🐺', '00', 0, 0, false, 0, 0, '', '', false);
 
 -- 5. 초기 인증 히스토리 데이터 삽입
 TRUNCATE TABLE runs RESTART IDENTITY;

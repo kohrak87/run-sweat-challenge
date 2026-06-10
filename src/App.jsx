@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import RaceBoard from './components/RaceBoard';
-import HistoryList from './components/HistoryList';
 import AdminPanel from './components/AdminPanel';
 import { supabase } from './supabaseClient';
 import { Sparkles, Activity, FileText, Loader2, User, Check, Settings } from 'lucide-react';
@@ -42,6 +41,12 @@ export default function App() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberAvatar, setNewMemberAvatar] = useState('🏃‍♂️');
+  const [newMemberPassword, setNewMemberPassword] = useState('00');
+  const [selectedMemberToVerify, setSelectedMemberToVerify] = useState(null);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
 
   const [currentDateStr, setCurrentDateStr] = useState(() => formatKoDate());
 
@@ -119,6 +124,7 @@ export default function App() {
           id: m.id,
           name: m.name,
           avatar: m.avatar,
+          password: m.password || '00',
           morningRuns: m.morning_runs,
           totalRuns: m.total_runs,
           todayCompleted: hasRunToday,
@@ -281,18 +287,25 @@ export default function App() {
       alert("이름을 입력해주세요!");
       return;
     }
+    const pw = newMemberPassword.trim();
+    if (pw && (pw.length !== 2 || isNaN(pw))) {
+      alert("비밀번호는 2자리 숫자여야 합니다! (예: 00, 12)");
+      return;
+    }
     try {
       setLoading(true);
       const { error } = await supabase
         .from('members')
         .insert([{
           name: newMemberName.trim(),
-          avatar: newMemberAvatar.trim() || '🏃‍♂️'
+          avatar: newMemberAvatar.trim() || '🏃‍♂️',
+          password: pw || '00'
         }]);
       if (error) throw error;
       
       setNewMemberName('');
       setNewMemberAvatar('🏃‍♂️');
+      setNewMemberPassword('00');
       setShowAddForm(false);
       await fetchData();
     } catch (err) {
@@ -535,10 +548,51 @@ export default function App() {
     }
   };
 
-  const handleSelectMember = (id) => {
-    setCurrentUserId(id);
-    localStorage.setItem('run_sweat_user_id', id);
-    setShowProfileSelector(false);
+  const handleSelectMember = (member) => {
+    setSelectedMemberToVerify(member);
+    setPasswordInput('');
+    setPasswordError('');
+  };
+
+  const verifyAndLogin = (e) => {
+    if (e) e.preventDefault();
+    if (!selectedMemberToVerify) return;
+
+    if (passwordInput === selectedMemberToVerify.password) {
+      setCurrentUserId(selectedMemberToVerify.id);
+      localStorage.setItem('run_sweat_user_id', selectedMemberToVerify.id);
+      setSelectedMemberToVerify(null);
+      setPasswordInput('');
+      setPasswordError('');
+      setShowProfileSelector(false);
+    } else {
+      setPasswordError('비밀번호가 올바르지 않습니다.');
+    }
+  };
+
+  const handleUpdatePassword = async (memberId, newPassword) => {
+    if (!newPassword || newPassword.length !== 2 || isNaN(newPassword)) {
+      alert("비밀번호는 2자리 숫자여야 합니다!");
+      return false;
+    }
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .from('members')
+        .update({ password: newPassword })
+        .eq('id', memberId);
+      if (error) throw error;
+      
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: newPassword } : m));
+      alert("비밀번호가 성공적으로 변경되었습니다!");
+      return true;
+    } catch (err) {
+      console.error("Password update error:", err);
+      alert("비밀번호 변경 중 오류가 발생했습니다: " + err.message);
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -593,12 +647,6 @@ export default function App() {
             벌금 레이스 현황
           </button>
           <button 
-            onClick={() => setActiveTab('feed')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'feed' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
-          >
-            인증 피드
-          </button>
-          <button 
             onClick={() => setActiveTab('rules')}
             className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'rules' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
@@ -634,16 +682,6 @@ export default function App() {
               <RaceBoard members={members} currentUserId={currentUserId} />
             )}
 
-            {activeTab === 'feed' && (
-              <HistoryList 
-                histories={histories} 
-                onDeleteRun={handleDeleteRun} 
-                onEditRun={handleEditRun}
-                auditLogs={auditLogs}
-                isAdminUnlocked={isAdminUnlocked}
-              />
-            )}
-
             {activeTab === 'admin' && (
               <AdminPanel
                 isAdminUnlocked={isAdminUnlocked}
@@ -655,6 +693,7 @@ export default function App() {
                 onEditRun={handleEditRun}
                 members={members}
                 onRenameMember={handleRenameMember}
+                onUpdatePassword={handleUpdatePassword}
               />
             )}
 
@@ -709,91 +748,237 @@ export default function App() {
 
       {/* 접속자 프로필 선택 모달 */}
       {showProfileSelector && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
           <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
             <h3 className="font-extrabold text-xl text-white text-center mb-2">🏃‍♂️ RunSweat 챌린지</h3>
-            <p className="text-xs text-slate-400 text-center mb-6">접속 중인 크루원을 선택해 주세요!</p>
+            
+            {selectedMemberToVerify ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center text-center my-4">
+                  <span className="text-5xl mb-2">{selectedMemberToVerify.avatar}</span>
+                  <h4 className="font-extrabold text-lg text-white">{selectedMemberToVerify.name} 님으로 로그인</h4>
+                  <p className="text-xs text-slate-400 mt-1">이 크루원의 2자리 비밀번호를 입력해 주세요.</p>
+                </div>
 
-            <div className="space-y-3">
-              {members.map(member => (
-                <button
-                  key={member.id}
-                  onClick={() => handleSelectMember(member.id)}
-                  className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition ${
-                    member.id === currentUserId
-                      ? 'bg-brand-neon/15 border-brand-neon text-brand-neon'
-                      : 'bg-brand-charcoal hover:bg-slate-800 border-slate-800 text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{member.avatar}</span>
-                    <span className="font-semibold text-sm">{member.name}</span>
-                  </div>
-                  {member.id === currentUserId && <Check size={16} />}
-                </button>
-              ))}
-            </div>
+                <form onSubmit={verifyAndLogin} className="space-y-4">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength="2"
+                    value={passwordInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setPasswordInput(val);
+                      if (passwordError) setPasswordError('');
+                    }}
+                    placeholder="••"
+                    className="w-24 mx-auto block bg-slate-950 border border-slate-800 rounded-xl py-3 text-center text-xl font-bold tracking-widest focus:border-brand-cyan focus:outline-none text-white font-mono"
+                    autoFocus
+                  />
 
-            {/* 새 멤버 추가 버튼 및 입력 폼 */}
-            <div className="mt-4 pt-4 border-t border-slate-800/80">
-              {!showAddForm ? (
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition flex items-center justify-center gap-1.5"
-                >
-                  ➕ 새로운 크루원 추가하기
-                </button>
-              ) : (
-                <form onSubmit={handleAddMember} className="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800">
-                  <div className="flex gap-2">
-                    <div className="w-1/4">
-                      <label className="block text-[10px] text-slate-500 mb-1 font-medium">아이콘(이모지)</label>
-                      <input
-                        type="text"
-                        value={newMemberAvatar}
-                        onChange={(e) => setNewMemberAvatar(e.target.value)}
-                        placeholder="🏃‍♂️"
-                        maxLength="4"
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-2 text-center text-sm focus:border-brand-cyan focus:outline-none"
-                      />
+                  {passwordError && (
+                    <p className="text-xs text-brand-red font-medium text-center">{passwordError}</p>
+                  )}
+
+                  {selectedMemberToVerify.password === '00' && (
+                    <div className="bg-brand-cyan/5 border border-brand-cyan/15 rounded-lg p-3 text-[11px] text-slate-300 text-center leading-relaxed">
+                      💡 초기 비밀번호는 <strong className="text-brand-cyan font-semibold">00</strong>입니다. <br />
+                      로그인 후 프로필 목록의 🔑 버튼으로 변경할 수 있습니다.
                     </div>
-                    <div className="flex-1">
-                      <label className="block text-[10px] text-slate-500 mb-1 font-medium">이름</label>
-                      <input
-                        type="text"
-                        value={newMemberName}
-                        onChange={(e) => setNewMemberName(e.target.value)}
-                        placeholder="이름 입력 (예: 홍길동)"
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-medium"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
+                  )}
+
+                  <div className="flex gap-2.5 pt-2">
                     <button
                       type="button"
-                      onClick={() => setShowAddForm(false)}
-                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-1.5 rounded-lg text-xs font-semibold transition"
+                      onClick={() => {
+                        setSelectedMemberToVerify(null);
+                        setPasswordInput('');
+                        setPasswordError('');
+                      }}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition"
+                    >
+                      이전으로
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={passwordInput.length !== 2}
+                      className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan disabled:opacity-40 disabled:cursor-not-allowed border border-brand-cyan/45 font-bold py-2.5 rounded-xl text-xs transition shadow-cyan-glow"
+                    >
+                      확인
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : isChangingPassword ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center text-center my-4">
+                  <span className="text-5xl mb-2">{currentUser.avatar}</span>
+                  <h4 className="font-extrabold text-lg text-white">{currentUser.name} 님 비밀번호 변경</h4>
+                  <p className="text-xs text-slate-400 mt-1">새로 사용할 2자리 비밀번호를 입력해 주세요.</p>
+                </div>
+
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (newPasswordInput.length !== 2 || isNaN(newPasswordInput)) {
+                    alert("비밀번호는 2자리 숫자여야 합니다!");
+                    return;
+                  }
+                  const success = await handleUpdatePassword(currentUser.id, newPasswordInput);
+                  if (success) {
+                    setIsChangingPassword(false);
+                    setNewPasswordInput('');
+                  }
+                }} className="space-y-4">
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength="2"
+                    value={newPasswordInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setNewPasswordInput(val);
+                    }}
+                    placeholder="••"
+                    className="w-24 mx-auto block bg-slate-950 border border-slate-800 rounded-xl py-3 text-center text-xl font-bold tracking-widest focus:border-brand-cyan focus:outline-none text-white font-mono"
+                    autoFocus
+                  />
+
+                  <div className="flex gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangingPassword(false);
+                        setNewPasswordInput('');
+                      }}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs transition"
                     >
                       취소
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan py-1.5 rounded-lg text-xs font-bold transition border border-brand-cyan/45 shadow-cyan-glow"
+                      disabled={newPasswordInput.length !== 2}
+                      className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan disabled:opacity-40 disabled:cursor-not-allowed border border-brand-cyan/45 font-bold py-2.5 rounded-xl text-xs transition shadow-cyan-glow"
                     >
-                      크루원 등록!
+                      변경하기
                     </button>
                   </div>
                 </form>
-              )}
-            </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-400 text-center mb-6">접속 중인 크루원을 선택해 주세요!</p>
 
-            {currentUserId && (
-              <button 
-                onClick={() => setShowProfileSelector(false)}
-                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition"
-              >
-                닫기
-              </button>
+                <div className="space-y-3">
+                  {members.map(member => (
+                    <button
+                      key={member.id}
+                      onClick={() => handleSelectMember(member)}
+                      className={`w-full flex items-center justify-between p-3.5 rounded-xl border transition ${
+                        member.id === currentUserId
+                          ? 'bg-brand-neon/15 border-brand-neon text-brand-neon'
+                          : 'bg-brand-charcoal hover:bg-slate-800 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{member.avatar}</span>
+                        <span className="font-semibold text-sm">{member.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {member.id === currentUserId && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsChangingPassword(true);
+                            }}
+                            className="text-[10px] bg-slate-900 hover:bg-slate-850 hover:text-white text-slate-400 font-bold px-2 py-1 rounded transition border border-slate-800 flex items-center gap-1 hover:border-slate-700"
+                            title="비밀번호 변경"
+                          >
+                            🔑 비번 변경
+                          </button>
+                        )}
+                        {member.id === currentUserId && <Check size={16} />}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* 새 멤버 추가 버튼 및 입력 폼 */}
+                <div className="mt-4 pt-4 border-t border-slate-800/80">
+                  {!showAddForm ? (
+                    <button
+                      onClick={() => setShowAddForm(true)}
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold rounded-xl border border-slate-800 transition flex items-center justify-center gap-1.5"
+                    >
+                      ➕ 새로운 크루원 추가하기
+                    </button>
+                  ) : (
+                    <form onSubmit={handleAddMember} className="space-y-3 bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                      <div className="flex gap-2">
+                        <div className="w-1/4">
+                          <label className="block text-[10px] text-slate-500 mb-1 font-medium">아이콘(이모지)</label>
+                          <input
+                            type="text"
+                            value={newMemberAvatar}
+                            onChange={(e) => setNewMemberAvatar(e.target.value)}
+                            placeholder="🏃‍♂️"
+                            maxLength="4"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-2 text-center text-sm focus:border-brand-cyan focus:outline-none text-white"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-[10px] text-slate-500 mb-1 font-medium">이름</label>
+                          <input
+                            type="text"
+                            value={newMemberName}
+                            onChange={(e) => setNewMemberName(e.target.value)}
+                            placeholder="이름 입력"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3 text-sm focus:border-brand-cyan focus:outline-none text-white font-medium"
+                          />
+                        </div>
+                        <div className="w-1/4">
+                          <label className="block text-[10px] text-slate-500 mb-1 font-medium">비번 (2자리)</label>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength="2"
+                            value={newMemberPassword}
+                            onChange={(e) => setNewMemberPassword(e.target.value.replace(/[^0-9]/g, ''))}
+                            placeholder="00"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-2 text-center text-sm focus:border-brand-cyan focus:outline-none text-white font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddForm(false)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-1.5 rounded-lg text-xs font-semibold transition"
+                        >
+                          취소
+                        </button>
+                        <button
+                          type="submit"
+                          className="flex-1 bg-brand-cyan/25 hover:bg-brand-cyan/35 text-brand-cyan py-1.5 rounded-lg text-xs font-bold transition border border-brand-cyan/45 shadow-cyan-glow"
+                        >
+                          크루원 등록!
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                {currentUserId && (
+                  <button 
+                    onClick={() => setShowProfileSelector(false)}
+                    className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-xs mt-6 transition"
+                  >
+                    닫기
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
