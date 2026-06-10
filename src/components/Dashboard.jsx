@@ -464,7 +464,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
             <h3 className="font-extrabold text-xl text-white mb-4 flex items-center gap-2">
-              <Activity className="text-brand-cyan" /> 🔍 가민/스트라바 AI 분석 결과
+              <Activity className="text-brand-cyan" /> 🔍 러닝 인증샷 AI 자동 분석
             </h3>
             
             <div className="space-y-4 mb-6">
@@ -477,12 +477,31 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
               {!localStorage.getItem('run_sweat_gemini_api_key') ? (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2.5 text-xs">
                   <p className="text-slate-200 font-bold flex items-center gap-1 font-inter">
-                    💡 <span className="text-brand-neon">AI 자동 채우기 사용</span>
+                    💡 <span className="text-brand-neon">AI 자동 데이터 인식 사용</span>
                   </p>
-                  <p className="text-[11px] text-slate-400 leading-normal">
-                    Gemini API 키를 등록하면 스크린샷 속의 거리, 시간, 날짜를 AI가 자동으로 인식해 채워줍니다. 키는 본인 브라우저(`localStorage`)에만 저장되어 안전합니다.
-                  </p>
-                  <div className="flex gap-2">
+                  <div className="text-[11px] text-slate-400 leading-relaxed space-y-1">
+                    <p>
+                      가민/스트라바 캡처 이미지에서 거리, 시간, 날짜를 자동으로 추출하기 위해 <strong>Google Gemini API Key</strong>가 사용됩니다.
+                    </p>
+                    <p className="bg-slate-950 p-2 rounded border border-slate-850 mt-1">
+                      🔑 <strong>API 키 무료 발급처:</strong><br />
+                      <a 
+                        href="https://aistudio.google.com/" 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-brand-cyan hover:text-brand-neon underline font-bold inline-block mt-0.5"
+                      >
+                        👉 Google AI Studio (클릭해서 이동)
+                      </a>
+                      <span className="block text-[10px] text-slate-500 mt-0.5">
+                        (접속 후 구글 로그인 → <strong>Get API key</strong> 클릭 → <strong>Create API key</strong> 생성)
+                      </span>
+                    </p>
+                    <p className="text-[10px] text-slate-500 pt-1">
+                      ※ 키는 본인 브라우저(localStorage)에만 저장되므로 서버로 유출되지 않아 안전합니다.
+                    </p>
+                  </div>
+                  <div className="flex gap-2 pt-1">
                     <input
                       type="password"
                       value={geminiApiKey}

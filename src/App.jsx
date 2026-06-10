@@ -80,6 +80,18 @@ export default function App() {
     try {
       setLoading(true);
       
+      // 30일 지난 오래된 데이터 자동 삭제 (캐시/데이터 다이어트)
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+      const { error: deleteOldError } = await supabase
+        .from('runs')
+        .delete()
+        .lt('created_at', oneMonthAgo.toISOString());
+      
+      if (deleteOldError) {
+        console.error("오래된 인증 데이터 자동 삭제 중 오류:", deleteOldError);
+      }
+      
       // 1. Fetch members and runs in parallel
       const [membersRes, runsRes] = await Promise.all([
         supabase.from('members').select('*').order('id', { ascending: true }),
