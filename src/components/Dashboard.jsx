@@ -72,66 +72,172 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       let distance = null;
       let duration = null;
-      let timeOfDayVal = 'afternoon';
 
-      // 1. 거리 파싱 (소수점 km 또는 정수+km 등)
-      const kmMatches = rawText.match(/(\d+\.\d+)\s*(?:km|k|m|ki|mi)?/gi) || [];
-      const integerKmMatches = rawText.match(/(\d+)\s*(?:km|kilometers|kilometer)/gi) || [];
-      
+      // 1. 거리 파싱 (소수점 km 또는 정수+km 등, 단위 필수 지정하여 기온 등의 오검출 차단)
+      const distRegex = /(\d+(?:\.\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|k\b|m\b)/gi;
+      let match;
       let distCandidates = [];
-      kmMatches.forEach(m => {
-        const val = parseFloat(m.replace(/[^\d.]/g, ''));
-        if (!isNaN(val) && val > 0 && val < 100) distCandidates.push(val);
-      });
-      integerKmMatches.forEach(m => {
-        const val = parseFloat(m.replace(/[^\d.]/g, ''));
-        if (!isNaN(val) && val > 0 && val < 100) distCandidates.push(val);
-      });
+      
+      while ((match = distRegex.exec(rawText)) !== null) {
+        const val = parseFloat(match[1]);
+        const unit = match[2].toLowerCase();
+        if (!isNaN(val) && val > 0 && val < 100) {
+          let score = 0;
+          if (['km', 'lkm', 'krn', 'kin', 'mi'].includes(unit)) {
+            score = 10;
+          } else if (unit === 'k') {
+            score = 5;
+          } else if (unit === 'm') {
+            score = val >= 100 ? 4 : 1;
+          }
+          distCandidates.push({ value: val, unit, score });
+        }
+      }
+
+      // 스코어 기준 내림차순 정렬
+      distCandidates.sort((a, b) => b.score - a.score);
 
       if (distCandidates.length > 0) {
-        const sensibleDists = distCandidates.filter(d => d >= 1.0 && d <= 50.0);
-        distance = sensibleDists.length > 0 ? sensibleDists[0] : distCandidates[0];
+        let selected = distCandidates[0];
+        if (selected.unit === 'm' && selected.value >= 100) {
+          distance = selected.value / 1000;
+        } else {
+          distance = selected.value;
+        }
       }
 
       // 2. 시간 파싱 (hh:mm:ss 또는 mm:ss 또는 XX분 등)
-      const timeMatches = rawText.match(/(\d{1,2}):(\d{2}):(\d{2})/g) || [];
-      const minSecMatches = rawText.match(/(?:\s|^)(\d{1,2}):(\d{2})(?:\s|$)/g) || [];
-      const textMinMatches = rawText.match(/(\d+)\s*(?:min|minute|minutes|분)/gi) || [];
-
       let durCandidates = [];
-      timeMatches.forEach(m => {
-        const parts = m.split(':');
-        const total = parseInt(parts[0]) * 60 + parseInt(parts[1]) + parseInt(parts[2]) / 60;
-        if (total > 5 && total < 300) durCandidates.push(total);
-      });
-      if (durCandidates.length === 0) {
-        minSecMatches.forEach(m => {
-          const parts = m.trim().split(':');
-          const total = parseInt(parts[0]) + parseInt(parts[1]) / 65;
-          if (total > 5 && total < 300) durCandidates.push(total);
+
+      // A. hh:mm:ss 형태 매칭
+      const hhmmssRegex = /(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2})/g;
+      while ((match = hhmmssRegex.exec(rawText)) !== null) {
+        const hh = parseInt(match[1]);
+        const mm = parseInt(match[2]);
+        const ss = parseInt(match[3]);
+        const totalMin = hh * 60 + mm + ss / 60;
+        if (totalMin > 5 && totalMin < 300) {
+          durCandidates.push({
+            value: totalMin,
+            type: 'hhmmss',
+            score: 15,
+            raw: match[0]
+          });
+        }
+      }
+
+      // B. mm:ss 또는 hh:mm 형태 매칭 (페이스나 현재 시각 정보 필터링)
+      const mmssRegex = /(\d{1,2})\s*:\s*(\d{2})/g;
+      while ((match = mmssRegex.exec(rawText)) !== null) {
+        const val1 = parseInt(match[1]);
+        const val2 = parseInt(match[2]);
+        const fullMatch = match[0];
+        const index = match.index;
+        
+        // 해당 매칭 값이 페이스 정보인지 전후 맥락 검증
+        const contextAfter = rawText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
+        const contextBefore = rawText.substring(Math.max(0, index - 10), index).toLowerCase();
+        
+        if (contextAfter.includes('min') || contextAfter.includes('/') || contextAfter.includes('pace') || contextAfter.includes('"') || contextAfter.includes("'")) {
+          // 페이스 정보이므로 무시
+          continue;
+        }
+        
+        // 현재 시각/날짜 정보 영역에 포함된 시간인지 확인
+        const isClockTime = /am|pm|오전|오후/i.test(contextBefore + contextAfter) || 
+                            /\d{4}[/.-]\d{1,2}[/.-]\d{1,2}/.test(contextBefore) ||
+                            /\d{1,2}[/.-]\d{1,2}\s*\(/.test(contextBefore);
+        
+        let score = 5;
+        if (isClockTime) {
+          score = 1; // 기기 현재 시각은 우선순위 최소화
+        } else if (val1 > 24) {
+          score = 10; // 24시간을 넘어가면 일반 시계일 리 없으므로 높은 가중치 부여
+        }
+
+        const totalMin = val1 + val2 / 60;
+        if (totalMin > 5 && totalMin < 300) {
+          durCandidates.push({
+            value: totalMin,
+            type: 'mmss',
+            score: score,
+            raw: match[0]
+          });
+        }
+      }
+
+      // C. XX분/XXmin 형태 매칭
+      const textMinRegex = /(\d+)\s*(?:min|minute|minutes|분)\b/gi;
+      while ((match = textMinRegex.exec(rawText)) !== null) {
+        const val = parseInt(match[1]);
+        if (val > 5 && val < 300) {
+          durCandidates.push({
+            value: val,
+            type: 'textmin',
+            score: 12,
+            raw: match[0]
+          });
+        }
+      }
+
+      // 거리 정보가 추출되었다면, 시간 후보들과의 합리적인 페이스 검증(Pace = Duration / Distance)
+      if (distance) {
+        durCandidates.forEach(cand => {
+          const pace = cand.value / distance;
+          // 러닝 페이스가 2.5분/km ~ 15.0분/km(시속 4km~24km) 사이인 경우 궁합 보너스 추가
+          if (pace >= 2.5 && pace <= 15.0) {
+            cand.score += 50;
+          } else if (pace < 2.0 || pace > 25.0) {
+            cand.score -= 20; // 비현실적인 페이스에 대해 페널티 부여
+          }
         });
       }
-      if (durCandidates.length === 0) {
-        textMinMatches.forEach(m => {
-          const val = parseInt(m.replace(/[^\d]/g, ''));
-          if (!isNaN(val) && val > 5 && val < 300) durCandidates.push(val);
-        });
-      }
+
+      // 스코어 내림차순 정렬
+      durCandidates.sort((a, b) => b.score - a.score);
 
       if (durCandidates.length > 0) {
-        duration = Math.round(durCandidates[0]);
+        duration = Math.round(durCandidates[0].value);
       }
 
       // 3. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
+      let timeOfDayVal = 'afternoon';
       const isMorningText = /am|오전|morning/i.test(rawText);
-      const timeOfDayMatches = rawText.match(/(?:[0-2]?\d):(?:[0-5]\d)/g) || [];
-      let hasMorningHour = false;
-      timeOfDayMatches.forEach(t => {
-        const hour = parseInt(t.split(':')[0]);
-        if (hour >= 5 && hour < 9) hasMorningHour = true;
-      });
+      const timeMatches = rawText.match(/(?:[0-2]?\d):(?:[0-5]\d)/g) || [];
+      let clockHour = null;
+      
+      for (let t of timeMatches) {
+        const parts = t.split(':');
+        const hour = parseInt(parts[0]);
+        const idx = rawText.indexOf(t);
+        const contextBefore = rawText.substring(Math.max(0, idx - 15), idx);
+        const isClock = /\d{4}[/.-]\d{1,2}[/.-]\d{1,2}/.test(contextBefore) || 
+                        /\d{1,2}[/.-]\d{1,2}/.test(contextBefore) ||
+                        /am|pm|오전|오후/i.test(rawText.substring(Math.max(0, idx - 10), idx + t.length + 10));
+        
+        if (isClock) {
+          clockHour = hour;
+          break;
+        }
+      }
 
-      if (isMorningText || hasMorningHour) {
+      if (clockHour === null && timeMatches.length > 0) {
+        for (let t of timeMatches) {
+          const hour = parseInt(t.split(':')[0]);
+          if (hour <= 23) {
+            clockHour = hour;
+            if (duration && Math.abs(hour - duration) > 5) {
+              break;
+            }
+          }
+        }
+      }
+
+      if (clockHour !== null) {
+        if (clockHour >= 5 && clockHour <= 9) {
+          timeOfDayVal = 'morning';
+        }
+      } else if (isMorningText) {
         timeOfDayVal = 'morning';
       }
 
