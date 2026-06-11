@@ -212,7 +212,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       while ((match = mmssRegex.exec(rawText)) !== null) {
         const val1 = parseInt(match[1]);
-        const val2 = parseInt(match[2]);
+        const val2 = parseInt(match[3]); // match[2] is the separator, match[3] is the seconds/minutes
         const fullMatch = match[0];
         const index = match.index;
         
@@ -223,13 +223,22 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           continue;
         }
 
-        // 페이스 정보(/km, min/km, ', ") 제외
-        const contextAfter = rawText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
-        if (contextAfter.includes('min') || contextAfter.includes('/') || contextAfter.includes('pace') || contextAfter.includes('"') || contextAfter.includes("'")) {
+        // 페이스 정보(/km, min/km, ', ") 제외 (인접한 경우 오인 방지를 위해 첫글자 검사 포함)
+        const afterMatch = rawText.substring(index + fullMatch.length);
+        const trimmedAfter = afterMatch.trim();
+        const firstCharAfter = trimmedAfter.length > 0 ? trimmedAfter[0] : '';
+        if (
+          firstCharAfter === '/' || 
+          firstCharAfter === '"' || 
+          firstCharAfter === "'" || 
+          trimmedAfter.toLowerCase().startsWith('min') || 
+          trimmedAfter.toLowerCase().startsWith('pace')
+        ) {
           continue;
         }
 
         // 특정 단위 제외 (기온, 심박수 등)
+        const contextAfter = rawText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
         const isExcludedUnit = /[%°c|deg|spm|bpm|kcal|watts|ml|ms|cm]/i.test(contextAfter);
         if (isExcludedUnit) {
           continue;
