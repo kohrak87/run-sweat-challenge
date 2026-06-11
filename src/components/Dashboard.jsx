@@ -706,7 +706,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                     </button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* OCR raw text debug panel */}
               {ocrRawText && (
