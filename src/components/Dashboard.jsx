@@ -67,13 +67,13 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         img.onload = () => {
           const canvas = document.createElement('canvas');
           // Always upscale by 2x for better OCR readability, especially for small text like dates
+          // Disable image smoothing (nearest-neighbor) to keep digital fonts sharp and pixel-perfect.
           const scaleSize = 2.0;
           canvas.width = img.width * scaleSize;
           canvas.height = img.height * scaleSize;
           
           const ctx = canvas.getContext('2d');
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
+          ctx.imageSmoothingEnabled = false;
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -160,8 +160,12 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       // 0. 숫자 오독 및 공백 제거 등의 전처리 (날짜와 소수점 주변의 공백을 병합)
       // Remove '1' from global replacement to prevent merging unrelated numbers (e.g. "57:00 13" -> "57:0013")
       let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
-      // Support degree symbol or other OCR misread symbols as decimal separator (e.g., "8 ° 43" -> "8.43")
-      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_°oO®•\*])\s*(\d+)/g, '$1.$3');
+      // ONLY allow dots, commas, underscores as decimal separators globally to prevent turning "16°C 83%" into "16.83"
+      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_])\s*(\d+)/g, '$1.$3');
+      // Support degree symbol or other OCR misread symbols between number and unit (e.g. "9.12\n° km" -> "9.12 km")
+      cleanedText = cleanedText.replace(/([\d\s\.,_]+)\s*[°oO®•\*]\s*(km|KM|Km|mi|MI|Mi)/gi, '$1 $2');
+      // Support degree symbol as decimal point specifically when followed by double dots (Garmin Connect style: "8 ° 43.." -> "8.43..")
+      cleanedText = cleanedText.replace(/(\d+)\s*[°oO®•\*]\s*(\d+)\s*\.\./g, '$1.$2..');
 
       // 1. 날짜 파싱 및 시계 시간 제외 목록 구축
       let detectedDate = null;
