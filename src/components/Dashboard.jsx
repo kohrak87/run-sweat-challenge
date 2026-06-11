@@ -40,6 +40,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const [aiDetected, setAiDetected] = useState(false);
+  const [ocrRawText, setOcrRawText] = useState('');
+  const [showDebugText, setShowDebugText] = useState(false);
 
   const loadTesseract = () => {
     return new Promise((resolve, reject) => {
@@ -59,12 +61,25 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
     setIsAnalyzing(true);
     setAnalysisError('');
     setAiDetected(false);
+    setOcrRawText('');
 
     try {
       const Tesseract = await loadTesseract();
-      const result = await Tesseract.recognize(file, 'eng');
-      const rawText = result.data.text;
+      let rawText = '';
+      
+      try {
+        console.log("Attempting OCR with eng+kor...");
+        // Use eng+kor to recognize both Korean characters (분, 오전, 오후) and numbers/English (km, pace)
+        const result = await Tesseract.recognize(file, 'eng+kor');
+        rawText = result.data.text;
+      } catch (ocrErr) {
+        console.warn("OCR with eng+kor failed, retrying with eng only...", ocrErr);
+        const result = await Tesseract.recognize(file, 'eng');
+        rawText = result.data.text;
+      }
+
       console.log("OCR Raw Text:", rawText);
+      setOcrRawText(rawText);
 
       if (!rawText || rawText.trim().length === 0) {
         throw new Error("이미지에서 텍스트를 판독하지 못했습니다.");
@@ -77,20 +92,20 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       let match;
 
       // 1. 거리 후보군 추출
-      // A. 단위가 붙어 있는 숫자
-      const distUnitRegex = /(\d+(?:[\.,]\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|k\b|m\b)/gi;
+      // A. 단위가 붙어 있는 숫자 (쉼표/점/공백/언더바 데시멀 지원)
+      const distUnitRegex = /(\d+(?:[\s\.,_]\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|k\b|m\b)/gi;
       while ((match = distUnitRegex.exec(rawText)) !== null) {
-        const valStr = match[1].replace(',', '.');
+        const valStr = match[1].replace(/[\s_,]/g, '.'); // clean delimiters
         const val = parseFloat(valStr);
         const unit = match[2].toLowerCase();
         if (!isNaN(val) && val > 0 && val < 100) {
           let score = 5;
           if (['km', 'lkm', 'krn', 'kin', 'mi'].includes(unit)) {
-            score = 25; // 단위가 명확하면 매우 높은 스코어
+            score = 25; // 단위가 명확하면 높은 스코어
           } else if (unit === 'k') {
             score = 15;
           } else if (unit === 'm') {
-            score = val >= 100 ? 10 : 2; // m 단위는 큰 숫자가 아니면 낮은 스코어
+            score = val >= 10 ? 2 : 5; // 10m 이상이면 고도/상승 등이므로 거리가 아님(낮은 스코어). 10m 미만이면 km의 오독일 수 있으므로 중간 스코어.
           }
           distCandidates.push({ value: val, unit, score, raw: match[0] });
         }
@@ -119,8 +134,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       // 2. 시간 후보군 추출
       let durCandidates = [];
 
-      // A. hh:mm:ss 형태 매칭
-      const hhmmssRegex = /(\d{1,2})\s*[:;.,\s]\s*(\d{2})\s*[:;.,\s]\s*(\d{2})/g;
+      // A. hh:mm:ss 형태 매칭 (다양한 구분자 지원)
+      const hhmmssRegex = /(\d{1,2})\s*[:;.,\s_-]\s*(\d{2})\s*[:;.,\s_-]\s*(\d{2})/g;
       while ((match = hhmmssRegex.exec(rawText)) !== null) {
         const hh = parseInt(match[1]);
         const mm = parseInt(match[2]);
@@ -137,7 +152,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       }
 
       // B. mm:ss 또는 hh:mm 형태 매칭 (페이스나 현재 시각 정보 필터링)
-      const mmssRegex = /\b(\d{1,2})\s*([:;.,\s])\s*(\d{2})\b/g;
+      const mmssRegex = /\b(\d{1,2})\s*([:;.,\s_-])\s*(\d{2})\b/g;
       while ((match = mmssRegex.exec(rawText)) !== null) {
         const val1 = parseInt(match[1]);
         const val2 = parseInt(match[2]);
@@ -200,7 +215,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       // 3. 페이스(Pace) 후보군 추출 (예: 5'35", 5:35 min/km)
       let paceCandidates = [];
-      const paceRegex = /(\d+)\s*[':\s;.,]\s*(\d{2})\s*(?:"|''|min\/km|\/km|pace)/gi;
+      const paceRegex = /(\d+)\s*[':\s;.,_-]\s*(\d{2})\s*(?:"|''|min\/km|\/km|pace)/gi;
       while ((match = paceRegex.exec(rawText)) !== null) {
         const min = parseInt(match[1]);
         const sec = parseInt(match[2]);
@@ -220,16 +235,18 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
             let pairScore = distCand.score + durCand.score;
             
             let currentDist = distCand.value;
-            if (distCand.unit === 'm' && distCand.value >= 100) {
+            // m(미터) 단위는 10m 이상일 때만 km로 변환. 10m 미만은 km의 오독으로 간주하여 변환하지 않음.
+            if (distCand.unit === 'm' && distCand.value >= 10) {
               currentDist = distCand.value / 1000;
             }
 
             const calculatedPace = durCand.value / currentDist;
             
-            if (calculatedPace >= 2.5 && calculatedPace <= 15.0) {
+            // 러닝 페이스 합리성 검증 (현실적 러닝 페이스: 3.0 ~ 15.0 min/km)
+            if (calculatedPace >= 3.0 && calculatedPace <= 15.0) {
               pairScore += 30;
-            } else if (calculatedPace < 2.0 || calculatedPace > 25.0) {
-              pairScore -= 40;
+            } else {
+              pairScore -= 40; // 비현실적인 속도 페널티 강화
             }
 
             let paceMatched = false;
@@ -259,9 +276,10 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         distance = bestPair.distance;
         duration = bestPair.duration;
       } else {
+        // Fallback
         if (distCandidates.length > 0) {
           let selected = distCandidates[0];
-          distance = (selected.unit === 'm' && selected.value >= 100) ? selected.value / 1000 : selected.value;
+          distance = (selected.unit === 'm' && selected.value >= 10) ? selected.value / 1000 : selected.value;
         }
         if (durCandidates.length > 0) {
           duration = Math.round(durCandidates[0].value);
@@ -271,7 +289,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       // 5. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
       let timeOfDayVal = 'afternoon';
       const isMorningText = /am|오전|morning/i.test(rawText);
-      const clockTimeRegex = /\b([0-2]?\d)\s*[:;.,\s]\s*([0-5]\d)\b/g;
+      const clockTimeRegex = /\b([0-2]?\d)\s*[:;.,\s_-]\s*([0-5]\d)\b/g;
       let clockHour = null;
       let clockMatch;
       
@@ -334,6 +352,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       }
     } catch (err) {
       console.error("OCR analysis error:", err);
+      setOcrRawText(err.message || "이미지 분석 도중 오류가 발생했습니다.");
       setAnalysisError(err.message || "이미지 분석 도중 오류가 발생했습니다.");
     } finally {
       setIsAnalyzing(false);
@@ -725,9 +744,29 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 text-center text-xs text-slate-400">
-                  이미지 분석을 대기 중입니다.
+              )}
+
+              {/* OCR raw text debug panel */}
+              {ocrRawText && (
+                <div className="border border-slate-800 bg-slate-950/40 rounded-xl p-2.5 text-left">
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugText(!showDebugText)}
+                    className="text-[10px] text-slate-500 hover:text-slate-400 font-bold flex justify-between w-full focus:outline-none"
+                  >
+                    <span className="flex items-center gap-1">⚙️ OCR 판독 디버그 텍스트</span>
+                    <span>{showDebugText ? '닫기 ▲' : '열기 ▼'}</span>
+                  </button>
+                  {showDebugText && (
+                    <div className="mt-2">
+                      <p className="text-[9px] text-slate-500 mb-1 leading-normal">
+                        * Tesseract OCR이 이미지에서 읽어 들인 원시 문자열입니다. 분석이 매끄럽지 않은 경우 오독된 문자를 확인할 수 있습니다.
+                      </p>
+                      <pre className="text-[9px] text-slate-400 font-mono max-h-36 overflow-y-auto whitespace-pre-wrap break-all p-2 bg-slate-900/60 border border-slate-800 rounded-lg">
+                        {ocrRawText}
+                      </pre>
+                    </div>
+                  )}
                 </div>
               )}
 
