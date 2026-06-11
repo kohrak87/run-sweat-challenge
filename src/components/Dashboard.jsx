@@ -155,8 +155,9 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         throw new Error("이미지에서 텍스트를 판독하지 못했습니다.");
       }
 
-      // 0. 숫자 오독 및 공백 제거 등의 전처리 (예: "7. 06" -> "7.06", "7 . 06" -> "7.06")
-      const cleanedText = rawText.replace(/(\d+)\s*[\.,_]\s*(\d+)/g, '$1.$2');
+      // 0. 숫자 오독 및 공백 제거 등의 전처리 (날짜와 소수점 주변의 공백을 병합)
+      let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
+      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_])\s*(\d+)/g, '$1$2$3');
 
       // 1. 날짜 파싱 및 시계 시간 제외 목록 구축
       // 연도는 2000년대(20\d{2})로 한정하여 엉뚱한 수치 결합(예: 9702-00-00)을 방지
@@ -190,13 +191,28 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      // 2. 거리 파싱 (단위 km, KM, mi 등 유연한 단위 매칭)
-      const distRegex = /(\d+(?:\.\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
+      // 2. 거리 파싱 (개선된 스페이스 병합 및 유연 단위 매칭)
+      // 숫자 부분에 공백, 마침표, 쉼표가 섞여 있어도 수용하도록 [\d\s\.,_]+ 로 매칭
+      const distRegex = /([\d\s\.,_]+)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|crm|crn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
       let distCandidates = [];
       let match;
       
       while ((match = distRegex.exec(cleanedText)) !== null) {
-        let val = parseFloat(match[1]);
+        // 만약 바로 뒤에 속도(/h, km/h)가 나오면 거리와 무관하므로 제외
+        const afterMatch = cleanedText.substring(match.index + match[0].length);
+        if (afterMatch.trim().startsWith('/h') || afterMatch.trim().startsWith('h')) {
+          continue;
+        }
+
+        // 숫자 부분에서 공백 제거
+        let numStr = match[1].replace(/\s+/g, '');
+        // 마침표나 쉼표가 여러개 연달아 나온 경우 (예: "7.06..") 하나로 정리
+        numStr = numStr.replace(/[\.,_]+/g, '.');
+        // 양 끝의 마침표 제거
+        if (numStr.startsWith('.')) numStr = numStr.substring(1);
+        if (numStr.endsWith('.')) numStr = numStr.slice(0, -1);
+
+        let val = parseFloat(numStr);
         if (!isNaN(val) && val > 0) {
           // OCR이 소수점을 누락하여 정수로 인식한 경우(예: 8.43 -> 843) 보정
           if (Number.isInteger(val) && val >= 100 && val < 10000) {
@@ -208,7 +224,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      // 만약 단위 기준 매칭에 실패한 경우, 상단 300글자 내에서 단독 소수(실수) 형태 후보군 추출 (예: 가민 7.06km에서 km가 생략/오독된 경우)
+      // 만약 단위 기준 매칭에 실패한 경우, 상단 300글자 내에서 단독 소수(실수) 형태 후보군 추출
       if (distCandidates.length === 0) {
         const floatRegex = /\b(\d+)\.(\d{1,2})\b/g;
         let floatMatch;
@@ -216,11 +232,21 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         while ((floatMatch = floatRegex.exec(topText)) !== null) {
           const val = parseFloat(floatMatch[0]);
           if (val > 1.0 && val < 50.0) {
-            // 날짜 파트(예: 2026/6/8 중 6.8)는 제외
             const index = floatMatch.index;
             const contextBefore = topText.substring(Math.max(0, index - 5), index);
-            const contextAfter = topText.substring(index + floatMatch[0].length, index + floatMatch[0].length + 5);
-            if (contextBefore.includes('/') || contextBefore.includes('-') || contextAfter.includes('/') || contextAfter.includes('-')) {
+            const contextAfter = topText.substring(index + floatMatch[0].length, index + floatMatch[0].length + 15).toLowerCase();
+            
+            // 날짜/시간 제외 (바로 인접한 경우만 제외하도록 2글자로 제한)
+            const adjBefore = contextBefore.trim();
+            const adjAfter = contextAfter.trim();
+            const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || adjBefore.endsWith('.') ||
+                                  adjAfter.startsWith('/') || adjAfter.startsWith('-') || adjAfter.startsWith('.');
+            if (isDatePattern) {
+              continue;
+            }
+            // 제외 단위 제외
+            const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min)/i.test(contextAfter);
+            if (isExcludedUnit) {
               continue;
             }
             distCandidates.push(val);
@@ -228,19 +254,16 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      let distance = null;
-      if (distCandidates.length > 0) {
-        distance = distCandidates[0];
-      }
+      let distance = distCandidates.length > 0 ? distCandidates[0] : null;
 
       // 3. 시간 파싱 (hh:mm:ss 또는 mm:ss 형태)
-      // 한 줄 내에서의 분석으로 한정하기 위해 공백/탭[ \t]만 매칭하고 개행문자(\n) 매칭은 엄격히 차단
-      const mmssRegex = /\b(\d{1,2})[ \t]*([:;., \t_-])[ \t]*(\d{2})\b/g;
+      // 단일 라인 매칭을 위해 [ \t] 사용, 소수점/쉼표는 시간 구분자에서 제외하여 거리 오인 방지
+      const mmssRegex = /\b(\d{1,2})[ \t]*([:; \t_-])[ \t]*(\d{2})\b/g;
       let durCandidates = [];
 
       while ((match = mmssRegex.exec(cleanedText)) !== null) {
         const val1 = parseInt(match[1]);
-        const val2 = parseInt(match[3]); // match[2]는 구분자( separator ), match[3]이 초/분 값
+        const val2 = parseInt(match[3]);
         const fullMatch = match[0];
         const index = match.index;
         
@@ -251,21 +274,19 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           continue;
         }
 
-        // 페이스 정보(/km, min/km, ', ") 제외 (인접한 경우 오인 방지를 위해 첫글자 검사 포함)
+        // 페이스 정보(/km, min/km) 제외 (인접한 경우 오인 방지를 위해 첫글자 검사 포함)
         const afterMatch = cleanedText.substring(index + fullMatch.length);
         const trimmedAfter = afterMatch.trim();
         const firstCharAfter = trimmedAfter.length > 0 ? trimmedAfter[0] : '';
         if (
           firstCharAfter === '/' || 
-          firstCharAfter === '"' || 
-          firstCharAfter === "'" || 
           trimmedAfter.toLowerCase().startsWith('min') || 
           trimmedAfter.toLowerCase().startsWith('pace')
         ) {
           continue;
         }
 
-        // 특정 단위 제외 (기온, 심박수 등) - 캐릭터 클래스 버그 해결을 위해 그룹 (?:...)으로 수정
+        // 특정 단위 제외 (기온, 심박수 등)
         const contextAfter = cleanedText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
         const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm)/i.test(contextAfter);
         if (isExcludedUnit) {
