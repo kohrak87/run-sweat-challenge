@@ -155,14 +155,17 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         throw new Error("이미지에서 텍스트를 판독하지 못했습니다.");
       }
 
+      // 0. 숫자 오독 및 공백 제거 등의 전처리 (예: "7. 06" -> "7.06", "7 . 06" -> "7.06")
+      const cleanedText = rawText.replace(/(\d+)\s*[\.,_]\s*(\d+)/g, '$1.$2');
+
       // 1. 날짜 파싱 및 시계 시간 제외 목록 구축
-      // 날짜 포맷 예: 2026/6/10 또는 2026-6-10 또는 2026.6.10
-      const dateClockRegex = /(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})\s*(?:\([^)]+\))?\s*(\d{1,2})[:;.,\s_-](\d{2})/g;
+      // 연도는 2000년대(20\d{2})로 한정하여 엉뚱한 수치 결합(예: 9702-00-00)을 방지
+      const dateClockRegex = /(20\d{2})[/.-](\d{1,2})[/.-](\d{1,2})\b[^0-9\n]*\b(\d{1,2})[:;.,\s_-](\d{2})/g;
       let dateClockMatch;
       let ignoredTimes = [];
       let detectedDate = null;
 
-      while ((dateClockMatch = dateClockRegex.exec(rawText)) !== null) {
+      while ((dateClockMatch = dateClockRegex.exec(cleanedText)) !== null) {
         const yyyy = dateClockMatch[1];
         const mm = String(parseInt(dateClockMatch[2])).padStart(2, '0');
         const dd = String(parseInt(dateClockMatch[3])).padStart(2, '0');
@@ -177,8 +180,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       // 날짜 단독 포맷 매칭 (시계 시간이 없는 경우)
       if (!detectedDate) {
-        const dateRegex = /(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/g;
-        const dateMatch = dateRegex.exec(rawText);
+        const dateRegex = /(20\d{2})[/.-](\d{1,2})[/.-](\d{1,2})/g;
+        const dateMatch = dateRegex.exec(cleanedText);
         if (dateMatch) {
           const yyyy = dateMatch[1];
           const mm = String(parseInt(dateMatch[2])).padStart(2, '0');
@@ -187,17 +190,41 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      // 2. 거리 파싱 (단위 km, KM, mi, MI 계열 필수 매칭)
-      // 보폭(m)이나 고도(m) 등 엉뚱한 값 차단을 위해 m 단독 매칭 제거
-      const distRegex = /(\d+(?:[\s\.,_]\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi)\b/gi;
+      // 2. 거리 파싱 (단위 km, KM, mi 등 유연한 단위 매칭)
+      const distRegex = /(\d+(?:\.\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
       let distCandidates = [];
       let match;
       
-      while ((match = distRegex.exec(rawText)) !== null) {
-        const valStr = match[1].replace(/[\s_,]/g, '.');
-        const val = parseFloat(valStr);
-        if (!isNaN(val) && val > 0 && val < 100) {
-          distCandidates.push(val);
+      while ((match = distRegex.exec(cleanedText)) !== null) {
+        let val = parseFloat(match[1]);
+        if (!isNaN(val) && val > 0) {
+          // OCR이 소수점을 누락하여 정수로 인식한 경우(예: 8.43 -> 843) 보정
+          if (Number.isInteger(val) && val >= 100 && val < 10000) {
+            val = val / 100;
+          }
+          if (val < 100) {
+            distCandidates.push(val);
+          }
+        }
+      }
+
+      // 만약 단위 기준 매칭에 실패한 경우, 상단 300글자 내에서 단독 소수(실수) 형태 후보군 추출 (예: 가민 7.06km에서 km가 생략/오독된 경우)
+      if (distCandidates.length === 0) {
+        const floatRegex = /\b(\d+)\.(\d{1,2})\b/g;
+        let floatMatch;
+        const topText = cleanedText.substring(0, 300);
+        while ((floatMatch = floatRegex.exec(topText)) !== null) {
+          const val = parseFloat(floatMatch[0]);
+          if (val > 1.0 && val < 50.0) {
+            // 날짜 파트(예: 2026/6/8 중 6.8)는 제외
+            const index = floatMatch.index;
+            const contextBefore = topText.substring(Math.max(0, index - 5), index);
+            const contextAfter = topText.substring(index + floatMatch[0].length, index + floatMatch[0].length + 5);
+            if (contextBefore.includes('/') || contextBefore.includes('-') || contextAfter.includes('/') || contextAfter.includes('-')) {
+              continue;
+            }
+            distCandidates.push(val);
+          }
         }
       }
 
@@ -207,12 +234,13 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       }
 
       // 3. 시간 파싱 (hh:mm:ss 또는 mm:ss 형태)
-      const mmssRegex = /\b(\d{1,2})\s*([:;.,\s_-])\s*(\d{2})\b/g;
+      // 한 줄 내에서의 분석으로 한정하기 위해 공백/탭[ \t]만 매칭하고 개행문자(\n) 매칭은 엄격히 차단
+      const mmssRegex = /\b(\d{1,2})[ \t]*([:;., \t_-])[ \t]*(\d{2})\b/g;
       let durCandidates = [];
 
-      while ((match = mmssRegex.exec(rawText)) !== null) {
+      while ((match = mmssRegex.exec(cleanedText)) !== null) {
         const val1 = parseInt(match[1]);
-        const val2 = parseInt(match[3]); // match[2] is the separator, match[3] is the seconds/minutes
+        const val2 = parseInt(match[3]); // match[2]는 구분자( separator ), match[3]이 초/분 값
         const fullMatch = match[0];
         const index = match.index;
         
@@ -224,7 +252,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
 
         // 페이스 정보(/km, min/km, ', ") 제외 (인접한 경우 오인 방지를 위해 첫글자 검사 포함)
-        const afterMatch = rawText.substring(index + fullMatch.length);
+        const afterMatch = cleanedText.substring(index + fullMatch.length);
         const trimmedAfter = afterMatch.trim();
         const firstCharAfter = trimmedAfter.length > 0 ? trimmedAfter[0] : '';
         if (
@@ -237,9 +265,9 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           continue;
         }
 
-        // 특정 단위 제외 (기온, 심박수 등)
-        const contextAfter = rawText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
-        const isExcludedUnit = /[%°c|deg|spm|bpm|kcal|watts|ml|ms|cm]/i.test(contextAfter);
+        // 특정 단위 제외 (기온, 심박수 등) - 캐릭터 클래스 버그 해결을 위해 그룹 (?:...)으로 수정
+        const contextAfter = cleanedText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
+        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm)/i.test(contextAfter);
         if (isExcludedUnit) {
           continue;
         }
@@ -252,7 +280,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       // 4. XX분/XXmin 형태 추가 매칭
       const textMinRegex = /(\d+)\s*(?:min|minute|minutes|분)\b/gi;
-      while ((match = textMinRegex.exec(rawText)) !== null) {
+      while ((match = textMinRegex.exec(cleanedText)) !== null) {
         const val = parseInt(match[1]);
         if (val > 5 && val < 300) {
           durCandidates.push(val);
@@ -280,7 +308,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
 
       // 5. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
       let timeOfDayVal = 'afternoon';
-      const isMorningText = /am|오전|morning/i.test(rawText);
+      const isMorningText = /am|오전|morning/i.test(cleanedText);
       
       // 날짜 옆에서 검출된 시작 시각(시계 시간)을 바탕으로 오전 5~9시 사이 여부 판별
       if (ignoredTimes.length > 0) {
