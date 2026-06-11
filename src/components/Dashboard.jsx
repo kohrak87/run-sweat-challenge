@@ -73,44 +73,54 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       let distance = null;
       let duration = null;
 
-      // 1. 거리 파싱 (소수점 km 또는 정수+km 등, 단위 필수 지정하여 기온 등의 오검출 차단)
-      const distRegex = /(\d+(?:\.\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|k\b|m\b)/gi;
-      let match;
       let distCandidates = [];
-      
-      while ((match = distRegex.exec(rawText)) !== null) {
-        const val = parseFloat(match[1]);
+      let match;
+
+      // 1. 거리 후보군 추출
+      // A. 단위가 붙어 있는 숫자
+      const distUnitRegex = /(\d+(?:[\.,]\d+)?)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|k\b|m\b)/gi;
+      while ((match = distUnitRegex.exec(rawText)) !== null) {
+        const valStr = match[1].replace(',', '.');
+        const val = parseFloat(valStr);
         const unit = match[2].toLowerCase();
         if (!isNaN(val) && val > 0 && val < 100) {
-          let score = 0;
+          let score = 5;
           if (['km', 'lkm', 'krn', 'kin', 'mi'].includes(unit)) {
-            score = 10;
+            score = 25; // 단위가 명확하면 매우 높은 스코어
           } else if (unit === 'k') {
-            score = 5;
+            score = 15;
           } else if (unit === 'm') {
-            score = val >= 100 ? 4 : 1;
+            score = val >= 100 ? 10 : 2; // m 단위는 큰 숫자가 아니면 낮은 스코어
           }
-          distCandidates.push({ value: val, unit, score });
+          distCandidates.push({ value: val, unit, score, raw: match[0] });
+        }
+      }
+
+      // B. 단위가 근처에 없더라도 소수점 형태인 숫자를 단독 후보군으로 추가
+      const decimalRegex = /\b(\d+[\.,]\d+)\b/g;
+      while ((match = decimalRegex.exec(rawText)) !== null) {
+        const valStr = match[1].replace(',', '.');
+        const val = parseFloat(valStr);
+        const index = match.index;
+        const contextAfter = rawText.substring(index + match[0].length, index + match[0].length + 15).toLowerCase();
+        const isExcluded = /[%°c|deg|spm|bpm|kcal|watts|ml|ms|cm]/i.test(contextAfter);
+        
+        if (!isExcluded && !isNaN(val) && val > 0 && val < 100) {
+          const isDuplicate = distCandidates.some(c => Math.abs(c.value - val) < 0.05);
+          if (!isDuplicate) {
+            distCandidates.push({ value: val, unit: 'none', score: 5, raw: match[0] });
+          }
         }
       }
 
       // 스코어 기준 내림차순 정렬
       distCandidates.sort((a, b) => b.score - a.score);
 
-      if (distCandidates.length > 0) {
-        let selected = distCandidates[0];
-        if (selected.unit === 'm' && selected.value >= 100) {
-          distance = selected.value / 1000;
-        } else {
-          distance = selected.value;
-        }
-      }
-
-      // 2. 시간 파싱 (hh:mm:ss 또는 mm:ss 또는 XX분 등)
+      // 2. 시간 후보군 추출
       let durCandidates = [];
 
       // A. hh:mm:ss 형태 매칭
-      const hhmmssRegex = /(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2})/g;
+      const hhmmssRegex = /(\d{1,2})\s*[:;.,\s]\s*(\d{2})\s*[:;.,\s]\s*(\d{2})/g;
       while ((match = hhmmssRegex.exec(rawText)) !== null) {
         const hh = parseInt(match[1]);
         const mm = parseInt(match[2]);
@@ -120,49 +130,57 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           durCandidates.push({
             value: totalMin,
             type: 'hhmmss',
-            score: 15,
+            score: 25,
             raw: match[0]
           });
         }
       }
 
       // B. mm:ss 또는 hh:mm 형태 매칭 (페이스나 현재 시각 정보 필터링)
-      const mmssRegex = /(\d{1,2})\s*:\s*(\d{2})/g;
+      const mmssRegex = /\b(\d{1,2})\s*([:;.,\s])\s*(\d{2})\b/g;
       while ((match = mmssRegex.exec(rawText)) !== null) {
         const val1 = parseInt(match[1]);
         const val2 = parseInt(match[2]);
         const fullMatch = match[0];
         const index = match.index;
+        const separator = match[2];
         
-        // 해당 매칭 값이 페이스 정보인지 전후 맥락 검증
         const contextAfter = rawText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
-        const contextBefore = rawText.substring(Math.max(0, index - 10), index).toLowerCase();
+        const contextBefore = rawText.substring(Math.max(0, index - 15), index).toLowerCase();
         
         if (contextAfter.includes('min') || contextAfter.includes('/') || contextAfter.includes('pace') || contextAfter.includes('"') || contextAfter.includes("'")) {
-          // 페이스 정보이므로 무시
           continue;
         }
         
-        // 현재 시각/날짜 정보 영역에 포함된 시간인지 확인
+        const isExcludedUnit = /[%°c|deg|spm|bpm|kcal|watts|ml|ms|cm]/i.test(contextAfter);
+        if (isExcludedUnit) {
+          continue;
+        }
+        
         const isClockTime = /am|pm|오전|오후/i.test(contextBefore + contextAfter) || 
                             /\d{4}[/.-]\d{1,2}[/.-]\d{1,2}/.test(contextBefore) ||
                             /\d{1,2}[/.-]\d{1,2}\s*\(/.test(contextBefore);
         
         let score = 5;
         if (isClockTime) {
-          score = 1; // 기기 현재 시각은 우선순위 최소화
+          score = 1;
         } else if (val1 > 24) {
-          score = 10; // 24시간을 넘어가면 일반 시계일 리 없으므로 높은 가중치 부여
+          score = 15;
+        } else if ([':', ';'].includes(separator)) {
+          score = 10;
         }
 
         const totalMin = val1 + val2 / 60;
         if (totalMin > 5 && totalMin < 300) {
-          durCandidates.push({
-            value: totalMin,
-            type: 'mmss',
-            score: score,
-            raw: match[0]
-          });
+          const isDuplicate = durCandidates.some(c => Math.abs(c.value - totalMin) < 0.1);
+          if (!isDuplicate) {
+            durCandidates.push({
+              value: totalMin,
+              type: 'mmss',
+              score: score,
+              raw: match[0]
+            });
+          }
         }
       }
 
@@ -174,59 +192,116 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           durCandidates.push({
             value: val,
             type: 'textmin',
-            score: 12,
+            score: 20,
             raw: match[0]
           });
         }
       }
 
-      // 거리 정보가 추출되었다면, 시간 후보들과의 합리적인 페이스 검증(Pace = Duration / Distance)
-      if (distance) {
-        durCandidates.forEach(cand => {
-          const pace = cand.value / distance;
-          // 러닝 페이스가 2.5분/km ~ 15.0분/km(시속 4km~24km) 사이인 경우 궁합 보너스 추가
-          if (pace >= 2.5 && pace <= 15.0) {
-            cand.score += 50;
-          } else if (pace < 2.0 || pace > 25.0) {
-            cand.score -= 20; // 비현실적인 페이스에 대해 페널티 부여
+      // 3. 페이스(Pace) 후보군 추출 (예: 5'35", 5:35 min/km)
+      let paceCandidates = [];
+      const paceRegex = /(\d+)\s*[':\s;.,]\s*(\d{2})\s*(?:"|''|min\/km|\/km|pace)/gi;
+      while ((match = paceRegex.exec(rawText)) !== null) {
+        const min = parseInt(match[1]);
+        const sec = parseInt(match[2]);
+        const paceVal = min + sec / 60;
+        if (paceVal > 2.0 && paceVal < 20.0) {
+          paceCandidates.push(paceVal);
+        }
+      }
+
+      // 4. 거리와 시간의 최적의 조합 탐색 (교차 검증)
+      let bestPair = null;
+      let highestPairScore = -999;
+
+      if (distCandidates.length > 0 && durCandidates.length > 0) {
+        for (let distCand of distCandidates) {
+          for (let durCand of durCandidates) {
+            let pairScore = distCand.score + durCand.score;
+            
+            let currentDist = distCand.value;
+            if (distCand.unit === 'm' && distCand.value >= 100) {
+              currentDist = distCand.value / 1000;
+            }
+
+            const calculatedPace = durCand.value / currentDist;
+            
+            if (calculatedPace >= 2.5 && calculatedPace <= 15.0) {
+              pairScore += 30;
+            } else if (calculatedPace < 2.0 || calculatedPace > 25.0) {
+              pairScore -= 40;
+            }
+
+            let paceMatched = false;
+            for (let paceVal of paceCandidates) {
+              if (Math.abs(calculatedPace - paceVal) < 0.25) {
+                paceMatched = true;
+                break;
+              }
+            }
+            
+            if (paceMatched) {
+              pairScore += 150;
+            }
+
+            if (pairScore > highestPairScore) {
+              highestPairScore = pairScore;
+              bestPair = {
+                distance: currentDist,
+                duration: Math.round(durCand.value)
+              };
+            }
           }
-        });
+        }
       }
 
-      // 스코어 내림차순 정렬
-      durCandidates.sort((a, b) => b.score - a.score);
-
-      if (durCandidates.length > 0) {
-        duration = Math.round(durCandidates[0].value);
+      if (bestPair && highestPairScore > 0) {
+        distance = bestPair.distance;
+        duration = bestPair.duration;
+      } else {
+        if (distCandidates.length > 0) {
+          let selected = distCandidates[0];
+          distance = (selected.unit === 'm' && selected.value >= 100) ? selected.value / 1000 : selected.value;
+        }
+        if (durCandidates.length > 0) {
+          duration = Math.round(durCandidates[0].value);
+        }
       }
 
-      // 3. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
+      // 5. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
       let timeOfDayVal = 'afternoon';
       const isMorningText = /am|오전|morning/i.test(rawText);
-      const timeMatches = rawText.match(/(?:[0-2]?\d):(?:[0-5]\d)/g) || [];
+      const clockTimeRegex = /\b([0-2]?\d)\s*[:;.,\s]\s*([0-5]\d)\b/g;
       let clockHour = null;
+      let clockMatch;
       
-      for (let t of timeMatches) {
-        const parts = t.split(':');
-        const hour = parseInt(parts[0]);
-        const idx = rawText.indexOf(t);
+      while ((clockMatch = clockTimeRegex.exec(rawText)) !== null) {
+        const hour = parseInt(clockMatch[1]);
+        const min = parseInt(clockMatch[2]);
+        const fullMatch = clockMatch[0];
+        const idx = clockMatch.index;
+        
         const contextBefore = rawText.substring(Math.max(0, idx - 15), idx);
+        const contextAfter = rawText.substring(idx + fullMatch.length, idx + fullMatch.length + 15).toLowerCase();
+        
         const isClock = /\d{4}[/.-]\d{1,2}[/.-]\d{1,2}/.test(contextBefore) || 
                         /\d{1,2}[/.-]\d{1,2}/.test(contextBefore) ||
-                        /am|pm|오전|오후/i.test(rawText.substring(Math.max(0, idx - 10), idx + t.length + 10));
+                        /am|pm|오전|오후/i.test(contextBefore + contextAfter);
         
-        if (isClock) {
+        if (isClock && hour <= 23 && min <= 59) {
           clockHour = hour;
           break;
         }
       }
 
-      if (clockHour === null && timeMatches.length > 0) {
-        for (let t of timeMatches) {
-          const hour = parseInt(t.split(':')[0]);
-          if (hour <= 23) {
-            clockHour = hour;
+      if (clockHour === null) {
+        clockTimeRegex.lastIndex = 0;
+        while ((clockMatch = clockTimeRegex.exec(rawText)) !== null) {
+          const hour = parseInt(clockMatch[1]);
+          const min = parseInt(clockMatch[2]);
+          if (hour <= 23 && min <= 59) {
             if (duration && Math.abs(hour - duration) > 5) {
+              clockHour = hour;
               break;
             }
           }
