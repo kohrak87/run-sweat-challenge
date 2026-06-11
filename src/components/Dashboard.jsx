@@ -57,6 +57,68 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
     });
   };
 
+  const preprocessImageForOcr = (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const scaleSize = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1;
+          canvas.width = img.width * scaleSize;
+          canvas.height = img.height * scaleSize;
+          
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          
+          let darkPixels = 0;
+          const totalPixels = data.length / 4;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i+1];
+            const b = data[i+2];
+            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+            if (luma < 128) darkPixels++;
+          }
+          
+          const isDarkMode = (darkPixels / totalPixels) > 0.5;
+          
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i+1];
+            const b = data[i+2];
+            
+            let v = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            // Contrast stretching
+            if (v > 200) v = 255;
+            else if (v < 50) v = 0;
+            else {
+              v = ((v - 50) / 150) * 255;
+            }
+            
+            if (isDarkMode) {
+              v = 255 - v;
+            }
+            
+            data[i] = v;
+            data[i+1] = v;
+            data[i+2] = v;
+          }
+          
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+      };
+    });
+  };
+
   const analyzeImageWithTesseract = async (file) => {
     setIsAnalyzing(true);
     setAnalysisError('');
@@ -64,17 +126,20 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
     setOcrRawText('');
 
     try {
+      console.log("Preprocessing image for OCR...");
+      const processedImgUrl = await preprocessImageForOcr(file);
+
       const Tesseract = await loadTesseract();
       let rawText = '';
       
       try {
         console.log("Attempting OCR with eng+kor...");
-        // Use eng+kor to recognize both Korean characters (분, 오전, 오후) and numbers/English (km, pace)
-        const result = await Tesseract.recognize(file, 'eng+kor');
+        // Use eng+kor to recognize both Korean characters and numbers/English
+        const result = await Tesseract.recognize(processedImgUrl, 'eng+kor');
         rawText = result.data.text;
       } catch (ocrErr) {
         console.warn("OCR with eng+kor failed, retrying with eng only...", ocrErr);
-        const result = await Tesseract.recognize(file, 'eng');
+        const result = await Tesseract.recognize(processedImgUrl, 'eng');
         rawText = result.data.text;
       }
 
