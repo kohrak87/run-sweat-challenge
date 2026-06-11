@@ -66,12 +66,14 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         img.src = event.target.result;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          const scaleSize = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1;
+          // Always upscale by 2x for better OCR readability, especially for small text like dates
+          const scaleSize = 2.0;
           canvas.width = img.width * scaleSize;
           canvas.height = img.height * scaleSize;
           
           const ctx = canvas.getContext('2d');
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -156,38 +158,107 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       }
 
       // 0. 숫자 오독 및 공백 제거 등의 전처리 (날짜와 소수점 주변의 공백을 병합)
+      // Remove '1' from global replacement to prevent merging unrelated numbers (e.g. "57:00 13" -> "57:0013")
       let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
-      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_])\s*(\d+)/g, '$1$2$3');
+      // Support degree symbol or other OCR misread symbols as decimal separator (e.g., "8 ° 43" -> "8.43")
+      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_°oO®•\*])\s*(\d+)/g, '$1.$3');
 
       // 1. 날짜 파싱 및 시계 시간 제외 목록 구축
-      // 연도는 2000년대(20\d{2})로 한정하여 엉뚱한 수치 결합(예: 9702-00-00)을 방지
-      const dateClockRegex = /(20\d{2})[/.-](\d{1,2})[/.-](\d{1,2})\b[^0-9\n]*\b(\d{1,2})[:;.,\s_-](\d{2})/g;
-      let dateClockMatch;
-      let ignoredTimes = [];
       let detectedDate = null;
+      let ignoredTimes = [];
 
+      // 헬퍼 함수: 위첨자/슬래시가 1로 인식된 경우 (예: 6/10 -> 6110) 분할 분석
+      const parseMisreadSlashDate = (yyyy, digitsStr) => {
+        for (let i = 1; i <= 2; i++) {
+          if (i > digitsStr.length) break;
+          const monthStr = digitsStr.substring(0, i);
+          const remainder = digitsStr.substring(i);
+          if (remainder.startsWith('1')) {
+            const dayStr = remainder.substring(1);
+            const m = parseInt(monthStr);
+            const d = parseInt(dayStr);
+            if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+              return `${yyyy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            }
+          }
+        }
+        return null;
+      };
+
+      // 포맷 1: YYYY/MM/DD 또는 YYYY-MM-DD (슬래시가 1로 오독된 경우 포함)
+      const dateClockRegex = /(20\d{2})([/\.\-1])\s*(\d{1,2})\s*([/\.\-1])\s*(\d{1,2})/g;
+      let dateClockMatch;
       while ((dateClockMatch = dateClockRegex.exec(cleanedText)) !== null) {
         const yyyy = dateClockMatch[1];
-        const mm = String(parseInt(dateClockMatch[2])).padStart(2, '0');
-        const dd = String(parseInt(dateClockMatch[3])).padStart(2, '0');
-        detectedDate = `${yyyy}-${mm}-${dd}`;
-        
-        // 날짜 바로 뒤에 붙은 시계 시간(예: 09:19)을 무시 목록에 추가
-        const clockHour = parseInt(dateClockMatch[4]);
-        const clockMin = parseInt(dateClockMatch[5]);
-        ignoredTimes.push(`${clockHour}:${clockMin}`);
-        ignoredTimes.push(`${String(clockHour).padStart(2, '0')}:${String(clockMin).padStart(2, '0')}`);
+        const mm = dateClockMatch[3];
+        const dd = dateClockMatch[5];
+        const m = parseInt(mm);
+        const d = parseInt(dd);
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+          detectedDate = `${yyyy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          break;
+        }
       }
 
-      // 날짜 단독 포맷 매칭 (시계 시간이 없는 경우)
+      // 포맷 1.5: 연도 뒤에 슬래시가 누락/오독되어 YYYY/MMDD 형태인 경우
       if (!detectedDate) {
-        const dateRegex = /(20\d{2})[/.-](\d{1,2})[/.-](\d{1,2})/g;
-        const dateMatch = dateRegex.exec(cleanedText);
-        if (dateMatch) {
-          const yyyy = dateMatch[1];
-          const mm = String(parseInt(dateMatch[2])).padStart(2, '0');
-          const dd = String(parseInt(dateMatch[3])).padStart(2, '0');
+        const dateMisreadSlashRegex = /(20\d{2})[/\.\-1]\s*(\d{3,4})\b/g;
+        let match = dateMisreadSlashRegex.exec(cleanedText);
+        if (match) {
+          const yyyy = match[1];
+          const digitsStr = match[2];
+          const res = parseMisreadSlashDate(yyyy, digitsStr);
+          if (res) detectedDate = res;
+        }
+      }
+
+      // 포맷 2: YYYY년 MM월 DD일
+      if (!detectedDate) {
+        const korDateRegex = /(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/g;
+        let match = korDateRegex.exec(cleanedText);
+        if (match) {
+          const yyyy = match[1];
+          const mm = String(parseInt(match[2])).padStart(2, '0');
+          const dd = String(parseInt(match[3])).padStart(2, '0');
           detectedDate = `${yyyy}-${mm}-${dd}`;
+        }
+      }
+
+      // 포맷 3: YYYY년 MM월 (일 정보가 오독된 경우 - 오늘 날짜로 대체)
+      if (!detectedDate) {
+        const korYearMonthRegex = /(20\d{2})\s*년\s*(\d{1,2})\s*월/g;
+        let match = korYearMonthRegex.exec(cleanedText);
+        if (match) {
+          const yyyy = match[1];
+          const mm = String(parseInt(match[2])).padStart(2, '0');
+          const today = new Date();
+          const dd = String(today.getDate()).padStart(2, '0');
+          detectedDate = `${yyyy}-${mm}-${dd}`;
+        }
+      }
+
+      // 포맷 4: MM월 DD일 또는 MM2DD2 (월/일 한글이 숫자 2 등으로 오독된 경우 포함)
+      if (!detectedDate) {
+        const shortKorDateRegex = /(\d{1,2})\s*(?:월|2)\s*(\d{1,2})\s*(?:일|2)/g;
+        let match = shortKorDateRegex.exec(cleanedText);
+        if (match) {
+          const today = new Date();
+          const yyyy = String(today.getFullYear());
+          const mm = String(parseInt(match[1])).padStart(2, '0');
+          const dd = String(parseInt(match[2])).padStart(2, '0');
+          detectedDate = `${yyyy}-${mm}-${dd}`;
+        }
+      }
+
+      // 시계 시간 제외 목록 구축 (날짜 옆 시간 또는 오늘 시계 시간 제외)
+      const clockRegex = /(?:오전|오후|AM|PM)?\s*(\d{1,2})[:;.,\s_-](\d{2})\s*(?:오전|오후|AM|PM)?/g;
+      let clockMatch;
+      while ((clockMatch = clockRegex.exec(cleanedText)) !== null) {
+        const hour = parseInt(clockMatch[1]);
+        const min = parseInt(clockMatch[2]);
+        if (hour >= 0 && hour <= 23 && min >= 0 && min <= 59) {
+          ignoredTimes.push(`${hour}:${min}`);
+          ignoredTimes.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
         }
       }
 
@@ -201,6 +272,12 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         // 만약 바로 뒤에 속도(/h, km/h)가 나오면 거리와 무관하므로 제외
         const afterMatch = cleanedText.substring(match.index + match[0].length);
         if (afterMatch.trim().startsWith('/h') || afterMatch.trim().startsWith('h')) {
+          continue;
+        }
+
+        // 만약 바로 앞에 콜론(:)이나 세미콜론(;)이 오면 페이스의 초 단위(예: 5:35/km)이므로 제외
+        const charBefore = match.index > 0 ? cleanedText[match.index - 1] : '';
+        if (charBefore === ':' || charBefore === ';') {
           continue;
         }
 
@@ -236,16 +313,17 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
             const contextBefore = topText.substring(Math.max(0, index - 5), index);
             const contextAfter = topText.substring(index + floatMatch[0].length, index + floatMatch[0].length + 15).toLowerCase();
             
-            // 날짜/시간 제외 (바로 인접한 경우만 제외하도록 2글자로 제한)
             const adjBefore = contextBefore.trim();
             const adjAfter = contextAfter.trim();
-            const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || adjBefore.endsWith('.') ||
-                                  adjAfter.startsWith('/') || adjAfter.startsWith('-') || adjAfter.startsWith('.');
+            
+            // 날짜/시간 제외 (점(.)이나 대시(-), 슬래시(/)가 숫자와 인접한 경우만 날짜로 취급)
+            const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || (adjBefore.endsWith('.') && /\d$/.test(adjBefore)) ||
+                                  adjAfter.startsWith('/') || adjAfter.startsWith('-') || (adjAfter.startsWith('.') && /^\.\d/.test(adjAfter));
             if (isDatePattern) {
               continue;
             }
-            // 제외 단위 제외
-            const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min)/i.test(contextAfter);
+            // 제외 단위 제외 (단, 다음 줄에 있는 다른 항목의 단위 오차 방지를 위해 같은 줄만 검사)
+            const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min)/i.test(contextAfter.split('\n')[0]);
             if (isExcludedUnit) {
               continue;
             }
@@ -257,8 +335,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       let distance = distCandidates.length > 0 ? distCandidates[0] : null;
 
       // 3. 시간 파싱 (hh:mm:ss 또는 mm:ss 형태)
-      // 단일 라인 매칭을 위해 [ \t] 사용, 소수점/쉼표는 시간 구분자에서 제외하여 거리 오인 방지
-      const mmssRegex = /\b(\d{1,2})[ \t]*([:; \t_-])[ \t]*(\d{2})\b/g;
+      // 단일 라인 매칭을 위해 [ \t] 사용, 소수점도 시간 구분자로 일부 허용 (Tesseract 오인 대응)
+      const mmssRegex = /\b(\d{1,2})[ \t]*([:;., \t_-])[ \t]*(\d{2})\b/g;
       let durCandidates = [];
 
       while ((match = mmssRegex.exec(cleanedText)) !== null) {
@@ -266,6 +344,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         const val2 = parseInt(match[3]);
         const fullMatch = match[0];
         const index = match.index;
+        const sep = match[2];
         
         // 날짜와 결합된 시계 시간(오전/오후 촬영 시각)은 제외
         const timeStr = `${val1}:${val2}`;
@@ -286,9 +365,20 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           continue;
         }
 
-        // 특정 단위 제외 (기온, 심박수 등)
+        // 소수점 구분자일 때는 뒤에 거리 단위(km, mi)나 보폭(m)이 오면 거리 수치이므로 스킵
+        if (sep === '.' || sep === ',') {
+          const contextBefore = cleanedText.substring(Math.max(0, index - 5), index);
+          if (contextBefore.toLowerCase().includes('km') || contextBefore.toLowerCase().includes('mi') ||
+              trimmedAfter.toLowerCase().startsWith('km') || trimmedAfter.toLowerCase().startsWith('m') || trimmedAfter.toLowerCase().startsWith('mi')) {
+            continue;
+          }
+        }
+
+        // 특정 단위 제외 (기온, 심박수 등 - 단, 같은 줄만 검증)
         const contextAfter = cleanedText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
-        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm)/i.test(contextAfter);
+        const firstLineAfter = contextAfter.split('\n')[0];
+        const isExcludedUnit = /(?:°c|deg|spm|bpm|kcal|watts|ml|ms|cm)/i.test(firstLineAfter) ||
+                               (/%/i.test(firstLineAfter) && (val1 + val2 / 60) < 25);
         if (isExcludedUnit) {
           continue;
         }
