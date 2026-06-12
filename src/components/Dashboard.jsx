@@ -916,8 +916,11 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
           <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
-            <h3 className="font-extrabold text-xl text-white mb-4 flex items-center gap-2">
-              <Activity className="text-brand-cyan" /> 🔍 러닝 인증샷 AI 자동 분석
+            <h3 className="font-extrabold text-xl text-white mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Activity className="text-brand-cyan" /> 🔍 러닝 인증샷 AI 자동 분석
+              </span>
+              <span className="text-[10px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-700">v1.0.4</span>
             </h3>
             
             <div className="space-y-4 mb-6">
