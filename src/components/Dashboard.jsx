@@ -565,24 +565,48 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   useEffect(() => {
     const calculateTimeLeft = () => {
       const now = new Date();
-      const currentDay = now.getDay(); // 0 is Sunday, 5 is Friday, 6 is Saturday
       
-      // Target is this week's Friday at 12:00:00 (Noon)
-      let target = new Date();
-      target.setHours(12, 0, 0, 0);
-
-      // Adjust to next Friday if today is Friday afternoon or Saturday
+      // Get current time in KST calendar components
+      let kstNow;
+      try {
+        kstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+      } catch (e) {
+        // Fallback to KST offset (+9)
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        kstNow = new Date(utc + (3600000 * 9));
+      }
+      
+      const currentDay = kstNow.getDay(); // 0 is Sunday, 5 is Friday, 6 is Saturday
+      const currentHour = kstNow.getHours();
+      
+      // Intermission window: Friday 12:00 PM (noon) KST to Saturday 00:00 (midnight) KST
+      const isClosed = (currentDay === 5 && currentHour >= 12);
+      
+      if (isClosed) {
+        setIsUrgent(false);
+        return { days: 0, hours: 0, minutes: 0, seconds: 0, isClosed: true };
+      }
+      
+      // Target is this week's Friday at 12:00:00 (Noon) KST
       let daysUntilFriday = 5 - currentDay;
-      if (daysUntilFriday < 0 || (daysUntilFriday === 0 && now.getHours() >= 12)) {
+      if (daysUntilFriday < 0 || (daysUntilFriday === 0 && currentHour >= 12)) {
         daysUntilFriday += 7;
       }
       
-      target.setDate(now.getDate() + daysUntilFriday);
+      const targetKstDate = new Date(kstNow);
+      targetKstDate.setDate(kstNow.getDate() + daysUntilFriday);
+      targetKstDate.setHours(12, 0, 0, 0);
+      
+      const yyyy = targetKstDate.getFullYear();
+      const mm = String(targetKstDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(targetKstDate.getDate()).padStart(2, '0');
+      const isoStr = `${yyyy}-${mm}-${dd}T12:00:00+09:00`;
+      const target = new Date(isoStr);
       
       const difference = target.getTime() - now.getTime();
       
       if (difference <= 0) {
-        return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+        return { days: 0, hours: 0, minutes: 0, seconds: 0, isClosed: false };
       }
 
       // Check if remaining time is less than 24 hours
@@ -596,7 +620,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         days: Math.floor(difference / (1000 * 60 * 60 * 24)),
         hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
         minutes: Math.floor((difference / 1000 / 60) % 60),
-        seconds: Math.floor((difference / 1000) % 60)
+        seconds: Math.floor((difference / 1000) % 60),
+        isClosed: false
       };
     };
 
@@ -705,34 +730,38 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
   return (
     <div className="space-y-8">
       {/* 마감 카운트다운 타이머 */}
-      <div className={`glass-panel rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between transition-all duration-300 ${isUrgent ? 'border-brand-red/50 shadow-red-glow' : 'border-slate-800'}`}>
+      <div className={`glass-panel rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between transition-all duration-300 ${timeLeft.isClosed ? 'border-slate-800 opacity-80' : isUrgent ? 'border-brand-red/50 shadow-red-glow' : 'border-slate-800'}`}>
         <div className="flex items-center gap-4 mb-4 md:mb-0">
-          <div className={`p-3 rounded-full ${isUrgent ? 'bg-brand-red/20 text-brand-red animate-pulse' : 'bg-brand-neon/10 text-brand-neon'}`}>
+          <div className={`p-3 rounded-full ${timeLeft.isClosed ? 'bg-slate-800 text-slate-500' : isUrgent ? 'bg-brand-red/20 text-brand-red animate-pulse' : 'bg-brand-neon/10 text-brand-neon'}`}>
             <Timer size={28} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-300">주간 숙제 집계 마감까지</h2>
-            <p className="text-xs text-slate-400">매주 토요일 00:00 ~ 금요일 12:00 AM (저녁 러닝 제외)</p>
+            <h2 className="text-lg font-semibold text-slate-300">
+              {timeLeft.isClosed ? '주간 숙제 집계 마감 (정산 대기 중)' : '주간 숙제 집계 마감까지'}
+            </h2>
+            <p className="text-xs text-slate-400">
+              {timeLeft.isClosed ? '새로운 주간 레이스는 토요일 00:00에 시작합니다.' : '매주 토요일 00:00 ~ 금요일 12:00 PM (금요일 저녁 러닝 제외)'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3 font-outfit">
           <div className="flex flex-col items-center">
-            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.days).padStart(2, '0')}</span>
+            <span className={`text-3xl md:text-4xl font-extrabold ${timeLeft.isClosed ? 'text-slate-600' : isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{timeLeft.isClosed ? '00' : String(timeLeft.days).padStart(2, '0')}</span>
             <span className="text-[10px] text-slate-400 mt-1 uppercase">Days</span>
           </div>
-          <span className="text-xl text-slate-500 font-bold">:</span>
+          <span className={`text-xl font-bold ${timeLeft.isClosed ? 'text-slate-700' : 'text-slate-500'}`}>:</span>
           <div className="flex flex-col items-center">
-            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.hours).padStart(2, '0')}</span>
+            <span className={`text-3xl md:text-4xl font-extrabold ${timeLeft.isClosed ? 'text-slate-600' : isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{timeLeft.isClosed ? '00' : String(timeLeft.hours).padStart(2, '0')}</span>
             <span className="text-[10px] text-slate-400 mt-1 uppercase">Hours</span>
           </div>
-          <span className="text-xl text-slate-500 font-bold">:</span>
+          <span className={`text-xl font-bold ${timeLeft.isClosed ? 'text-slate-700' : 'text-slate-500'}`}>:</span>
           <div className="flex flex-col items-center">
-            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{String(timeLeft.minutes).padStart(2, '0')}</span>
+            <span className={`text-3xl md:text-4xl font-extrabold ${timeLeft.isClosed ? 'text-slate-600' : isUrgent ? 'text-brand-red' : 'text-brand-neon'}`}>{timeLeft.isClosed ? '00' : String(timeLeft.minutes).padStart(2, '0')}</span>
             <span className="text-[10px] text-slate-400 mt-1 uppercase">Min</span>
           </div>
-          <span className="text-xl text-slate-500 font-bold">:</span>
+          <span className={`text-xl font-bold ${timeLeft.isClosed ? 'text-slate-700' : 'text-slate-500'}`}>:</span>
           <div className="flex flex-col items-center">
-            <span className={`text-3xl md:text-4xl font-extrabold ${isUrgent ? 'text-brand-red animate-pulse' : 'text-brand-cyan'}`}>{String(timeLeft.seconds).padStart(2, '0')}</span>
+            <span className={`text-3xl md:text-4xl font-extrabold ${timeLeft.isClosed ? 'text-slate-600' : isUrgent ? 'text-brand-red animate-pulse' : 'text-brand-cyan'}`}>{timeLeft.isClosed ? '00' : String(timeLeft.seconds).padStart(2, '0')}</span>
             <span className="text-[10px] text-slate-400 mt-1 uppercase">Sec</span>
           </div>
         </div>
