@@ -160,8 +160,10 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       // 0. 숫자 오독 및 공백 제거 등의 전처리 (날짜와 소수점 주변의 공백을 병합)
       // Remove '1' from global replacement to prevent merging unrelated numbers (e.g. "57:00 13" -> "57:0013")
       let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
-      // ONLY allow dots, commas, underscores as decimal separators globally to prevent turning "16°C 83%" into "16.83"
-      cleanedText = cleanedText.replace(/(\d+)\s*([\.,_])\s*(\d+)/g, '$1.$3');
+      // Support '=', dot, comma, underscore as decimal separators between digits (e.g. "7 = 0 6" -> "7.0 6")
+      cleanedText = cleanedText.replace(/(\d+)\s*([=\.,_])\s*(\d+)/g, '$1.$3');
+      // Clean up spaces inside decimal numbers (e.g. "7.0 6" -> "7.06", "9. 1 2" -> "9.12")
+      cleanedText = cleanedText.replace(/(\d+)\s*\.\s*([\d\s]+)\b/g, (m, p1, p2) => p1 + '.' + p2.replace(/\s+/g, ''));
       // Support degree symbol or other OCR misread symbols between number and unit (e.g. "9.12\n° km" -> "9.12 km")
       cleanedText = cleanedText.replace(/([\d\s\.,_]+)\s*[°oO®•\*]\s*(km|KM|Km|mi|MI|Mi)/gi, '$1 $2');
       // Support degree symbol as decimal point specifically when followed by double dots (Garmin Connect style: "8 ° 43.." -> "8.43..")
@@ -266,77 +268,146 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      // 2. 거리 파싱 (개선된 스페이스 병합 및 유연 단위 매칭)
-      // 숫자 부분에 공백, 마침표, 쉼표가 섞여 있어도 수용하도록 [\d\s\.,_]+ 로 매칭
-      const distRegex = /([\d\s\.,_]+)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|crm|crn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
-      let distCandidates = [];
-      let match;
+      // 2. 거리 파싱 (휴리스틱 채점 방식 도입)
+      let floatCandidates = [];
       
+      // A. 정규식 1: 숫자 + 단위 형태 매칭 (명시적 거리 매칭)
+      const distRegex = /([\d\s\.,_]+)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|crm|crn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
+      let match;
       while ((match = distRegex.exec(cleanedText)) !== null) {
-        // 만약 바로 뒤에 속도(/h, km/h)가 나오면 거리와 무관하므로 제외
-        const afterMatch = cleanedText.substring(match.index + match[0].length);
-        if (afterMatch.trim().startsWith('/h') || afterMatch.trim().startsWith('h')) {
-          continue;
-        }
-
-        // 만약 바로 앞에 콜론(:)이나 세미콜론(;)이 오면 페이스의 초 단위(예: 5:35/km)이므로 제외
-        const charBefore = match.index > 0 ? cleanedText[match.index - 1] : '';
-        if (charBefore === ':' || charBefore === ';') {
-          continue;
-        }
-
-        // 숫자 부분에서 공백 제거
         let numStr = match[1].replace(/\s+/g, '');
-        // 마침표나 쉼표가 여러개 연달아 나온 경우 (예: "7.06..") 하나로 정리
         numStr = numStr.replace(/[\.,_]+/g, '.');
-        // 양 끝의 마침표 제거
         if (numStr.startsWith('.')) numStr = numStr.substring(1);
         if (numStr.endsWith('.')) numStr = numStr.slice(0, -1);
 
-        let val = parseFloat(numStr);
-        if (!isNaN(val) && val > 0) {
-          // OCR이 소수점을 누락하여 정수로 인식한 경우(예: 8.43 -> 843) 보정
-          if (Number.isInteger(val) && val >= 100 && val < 10000) {
-            val = val / 100;
-          }
-          if (val < 100) {
-            distCandidates.push(val);
+        const val = parseFloat(numStr);
+        if (!isNaN(val) && val > 0 && val < 100) {
+          const charBefore = match.index > 0 ? cleanedText[match.index - 1] : '';
+          const afterText = cleanedText.substring(match.index + match[0].length);
+          const isPace = charBefore === ':' || charBefore === ';' || afterText.trim().startsWith('/h') || afterText.trim().startsWith('h');
+          
+          floatCandidates.push({
+            val: val,
+            index: match.index,
+            hasExplicitUnit: true,
+            isPace: isPace,
+            originalMatch: match[1]
+          });
+        }
+      }
+
+      // B. 정규식 2: 텍스트 전체에서 임의의 소수점 형태 매칭
+      const floatRegex = /\b(\d+)\.(\d{1,3})\b/g;
+      let floatMatch;
+      while ((floatMatch = floatRegex.exec(cleanedText)) !== null) {
+        const val = parseFloat(floatMatch[0]);
+        if (val > 0 && val < 100) {
+          const index = floatMatch.index;
+          // 이미 단위 기반 매칭에 포함된 후보는 스킵
+          const isAlreadyAdded = floatCandidates.some(c => Math.abs(c.index - index) < 5);
+          if (!isAlreadyAdded) {
+            floatCandidates.push({
+              val: val,
+              index: index,
+              hasExplicitUnit: false,
+              isPace: false,
+              originalMatch: floatMatch[0]
+            });
           }
         }
       }
 
-      // 만약 단위 기준 매칭에 실패한 경우, 상단 300글자 내에서 단독 소수(실수) 형태 후보군 추출
-      if (distCandidates.length === 0) {
-        const floatRegex = /\b(\d+)\.(\d{1,2})\b/g;
-        let floatMatch;
-        const topText = cleanedText.substring(0, 300);
-        while ((floatMatch = floatRegex.exec(topText)) !== null) {
-          const val = parseFloat(floatMatch[0]);
-          if (val > 1.0 && val < 50.0) {
-            const index = floatMatch.index;
-            const contextBefore = topText.substring(Math.max(0, index - 5), index);
-            const contextAfter = topText.substring(index + floatMatch[0].length, index + floatMatch[0].length + 15).toLowerCase();
-            
-            const adjBefore = contextBefore.trim();
-            const adjAfter = contextAfter.trim();
-            
-            // 날짜/시간 제외 (점(.)이나 대시(-), 슬래시(/)가 숫자와 인접한 경우만 날짜로 취급)
-            const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || (adjBefore.endsWith('.') && /\d$/.test(adjBefore)) ||
-                                  adjAfter.startsWith('/') || adjAfter.startsWith('-') || (adjAfter.startsWith('.') && /^\.\d/.test(adjAfter));
-            if (isDatePattern) {
-              continue;
-            }
-            // 제외 단위 제외 (단, 다음 줄에 있는 다른 항목의 단위 오차 방지를 위해 같은 줄만 검사)
-            const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min)/i.test(contextAfter.split('\n')[0]);
-            if (isExcludedUnit) {
-              continue;
-            }
-            distCandidates.push(val);
-          }
+      // C. 휴리스틱 채점으로 가장 적합한 달리기 거리 후보 선출
+      let bestDistanceCandidate = null;
+      let bestDistanceScore = -9999;
+
+      for (let candidate of floatCandidates) {
+        const val = candidate.val;
+        const index = candidate.index;
+        const orig = candidate.originalMatch || String(val);
+        
+        let score = 0;
+
+        // ① 값의 플로지빌리티 (일반적인 훈련 거리는 2km ~ 30km 사이가 가장 많음)
+        if (val >= 2.0 && val <= 30.0) {
+          score += 30;
+        } else if (val >= 1.0 && val <= 100.0) {
+          score += 10;
+        }
+
+        // ② 인덱스 위치 (러닝 거리는 항상 요약 화면 최상단 타이틀 옆/아래에 크게 배치되므로 텍스트 앞쪽일수록 가점)
+        if (index < 300) {
+          score += 40;
+        } else if (index < 500) {
+          score += 15;
+        }
+
+        // ③ 소수점 이하 두자리 가점 (러닝 기록은 거의 항상 7.06, 8.43, 9.12 처럼 소수점 2자리로 표기됨)
+        // 3.2, 4.6, 16.0 같은 1자리 지표들과 구별하기 위한 장치
+        const hasTwoDecimals = /\b\d+\.\d{2}\b/.test(orig);
+        if (hasTwoDecimals) {
+          score += 50;
+        }
+
+        // ④ 명시적 거리 단위 동반 여부
+        if (candidate.hasExplicitUnit && !candidate.isPace) {
+          score += 80;
+        }
+
+        // ⑤ 주변 단어(콘텍스트) 분석
+        const contextBefore = cleanedText.substring(Math.max(0, index - 15), index);
+        const contextAfter = cleanedText.substring(index + orig.length, index + orig.length + 20).toLowerCase();
+        const firstLineAfter = contextAfter.split('\n')[0];
+
+        // 주변 텍스트에 '거리', 'distance', 'km', 'mi' 단어 존재 시 가점
+        const hasDistanceKeyword = contextBefore.toLowerCase().includes('거리') || 
+                                     contextBefore.toLowerCase().includes('distance') || 
+                                     firstLineAfter.includes('거리') || 
+                                     firstLineAfter.includes('distance') ||
+                                     firstLineAfter.includes('km') ||
+                                     firstLineAfter.includes('mi');
+        if (hasDistanceKeyword) {
+          score += 100;
+        }
+
+        // ⑥ 페널티 및 제외 규칙
+        // 닫는 괄호 등이 인접한 경우 (예: 기기 명칭 "Forerunner 945)") 페널티
+        if (firstLineAfter.trim().startsWith(')') || firstLineAfter.trim().startsWith(']')) {
+          score -= 100;
+        }
+
+        // 날짜/시간 패턴과의 오독 제외
+        const adjBefore = contextBefore.trim();
+        const adjAfter = contextAfter.trim();
+        const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || (adjBefore.endsWith('.') && /\d$/.test(adjBefore)) ||
+                              adjAfter.startsWith('/') || adjAfter.startsWith('-') || (adjAfter.startsWith('.') && /^\.\d/.test(adjAfter));
+        if (isDatePattern) {
+          score -= 150;
+        }
+
+        // 페이스, 시간, 케이던스, 심박수, 칼로리, 보폭 등 타 지표 키워드 매칭 시 강력 페널티
+        // spm, bpm, kcal, watts, ml, ms, cm, 기온(°c), 습도(%), 보폭 단독 미터(m) 단위
+        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min|분|초)/i.test(firstLineAfter) ||
+                               (/\bm\b/i.test(firstLineAfter) && !candidate.hasExplicitUnit);
+        if (isExcludedUnit) {
+          score -= 150;
+        }
+
+        // 훈련 효과 지표 (유산소, 무산소) 키워드 페널티
+        const isTrainingEffect = contextBefore.includes('산소') || firstLineAfter.includes('산소');
+        if (isTrainingEffect) {
+          score -= 150;
+        }
+
+        console.log(`Candidate Distance ${val} Score: ${score} (hasExplicitUnit: ${candidate.hasExplicitUnit}, contextAfter: "${firstLineAfter.trim()}")`);
+
+        if (score > bestDistanceScore) {
+          bestDistanceScore = score;
+          bestDistanceCandidate = val;
         }
       }
 
-      let distance = distCandidates.length > 0 ? distCandidates[0] : null;
+      let distance = bestDistanceScore > -50 ? bestDistanceCandidate : null;
 
       // 3. 시간 파싱 (hh:mm:ss 또는 mm:ss 형태)
       // 단일 라인 매칭을 위해 [ \t] 사용, 소수점도 시간 구분자로 일부 허용 (Tesseract 오인 대응)
