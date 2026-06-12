@@ -162,8 +162,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
       // Support '=', dot, comma, underscore as decimal separators between digits (e.g. "7 = 0 6" -> "7.0 6")
       cleanedText = cleanedText.replace(/(\d+)\s*([=\.,_])\s*(\d+)/g, '$1.$3');
-      // Clean up spaces inside decimal numbers (e.g. "7.0 6" -> "7.06", "9. 1 2" -> "9.12")
-      cleanedText = cleanedText.replace(/(\d+)\s*\.\s*([\d\s]+)\b/g, (m, p1, p2) => p1 + '.' + p2.replace(/\s+/g, ''));
+      // Clean up spaces inside decimal numbers (e.g. "7.0 6" -> "7.06", "9. 1 2" -> "9.12") without merging separate numbers
+      cleanedText = cleanedText.replace(/\b(\d+)\s*\.\s*(\d(?:\s*\d){0,2})\b/g, (m, p1, p2) => p1 + '.' + p2.replace(/\s+/g, ''));
       // Support degree symbol or other OCR misread symbols between number and unit (e.g. "9.12\n° km" -> "9.12 km")
       cleanedText = cleanedText.replace(/([\d\s\.,_]+)\s*[°oO®•\*]\s*(km|KM|Km|mi|MI|Mi)/gi, '$1 $2');
       // Support degree symbol as decimal point specifically when followed by double dots (Garmin Connect style: "8 ° 43.." -> "8.43..")
