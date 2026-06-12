@@ -741,8 +741,9 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
             <Timer size={28} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-300">
-              {timeLeft.isClosed ? '주간 숙제 집계 마감 (정산 대기 중)' : '주간 숙제 집계 마감까지'}
+            <h2 className="text-lg font-semibold text-slate-300 flex items-center gap-2">
+              <span>{timeLeft.isClosed ? '주간 숙제 집계 마감 (정산 대기 중)' : '주간 숙제 집계 마감까지'}</span>
+              <span className="text-[10px] bg-slate-850 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-800">v1.0.4</span>
             </h2>
             <p className="text-xs text-slate-400">
               {timeLeft.isClosed ? '새로운 주간 레이스는 토요일 00:00에 시작합니다.' : '매주 토요일 00:00 ~ 금요일 12:00 PM (금요일 저녁 러닝 제외)'}
