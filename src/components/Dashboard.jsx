@@ -354,18 +354,23 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           score += 80;
         }
 
+        if (candidate.isPace) {
+          score -= 300; // 페이스/속도 수치 강력 페널티
+        }
+
         // ⑤ 주변 단어(콘텍스트) 분석
         const contextBefore = cleanedText.substring(Math.max(0, index - 15), index);
         const contextAfter = cleanedText.substring(index + orig.length, index + orig.length + 20).toLowerCase();
         const firstLineAfter = contextAfter.split('\n')[0];
 
-        // 주변 텍스트에 '거리', 'distance', 'km', 'mi' 단어 존재 시 가점
+        // 주변 텍스트에 '거리', 'distance', 'km', 'mi' 단어 존재 시 가점 (페이스/속도 단위는 거리 단위에서 제외)
+        const isContextPace = firstLineAfter.includes('km/h') || firstLineAfter.includes('/km') || firstLineAfter.includes('min/km') || firstLineAfter.includes('mi/h') || firstLineAfter.includes('/mi');
         const hasDistanceKeyword = contextBefore.toLowerCase().includes('거리') || 
                                      contextBefore.toLowerCase().includes('distance') || 
-                                     firstLineAfter.includes('거리') || 
-                                     firstLineAfter.includes('distance') ||
-                                     firstLineAfter.includes('km') ||
-                                     firstLineAfter.includes('mi');
+                                     (firstLineAfter.includes('거리') && !isContextPace) || 
+                                     (firstLineAfter.includes('distance') && !isContextPace) ||
+                                     (firstLineAfter.includes('km') && !isContextPace) ||
+                                     (firstLineAfter.includes('mi') && !isContextPace);
         if (hasDistanceKeyword) {
           score += 100;
         }
@@ -386,8 +391,8 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
 
         // 페이스, 시간, 케이던스, 심박수, 칼로리, 보폭 등 타 지표 키워드 매칭 시 강력 페널티
-        // spm, bpm, kcal, watts, ml, ms, cm, 기온(°c), 습도(%), 보폭 단독 미터(m) 단위
-        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min|분|초)/i.test(firstLineAfter) ||
+        // spm, bpm, kcal, watts, ml, ms, cm, 기온(°c), 습도(%), 보폭 단독 미터(m) 단위, 속도/페이스 단위
+        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min|분|초|\/km|\/mi|km\/h|mi\/h)/i.test(firstLineAfter) ||
                                (/\bm\b/i.test(firstLineAfter) && !candidate.hasExplicitUnit);
         if (isExcludedUnit) {
           score -= 150;
