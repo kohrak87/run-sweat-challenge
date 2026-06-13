@@ -141,7 +141,6 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       
       try {
         console.log("Attempting OCR with eng+kor...");
-        // Use eng+kor to recognize both Korean characters and numbers/English
         const result = await Tesseract.recognize(processedImgUrl, 'eng+kor');
         rawText = result.data.text;
       } catch (ocrErr) {
@@ -157,107 +156,84 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         throw new Error("이미지에서 텍스트를 판독하지 못했습니다.");
       }
 
-      // 0. 숫자 오독 및 공백 제거 등의 전처리 (날짜와 소수점 주변의 공백을 병합)
-      // Remove '1' from global replacement to prevent merging unrelated numbers (e.g. "57:00 13" -> "57:0013")
-      let cleanedText = rawText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
-      // Support '=', dot, comma, underscore as decimal separators between digits (e.g. "7 = 0 6" -> "7.0 6")
-      cleanedText = cleanedText.replace(/(\d+)\s*([=\.,_])\s*(\d+)/g, '$1.$3');
-      // Clean up spaces inside decimal numbers (e.g. "7.0 6" -> "7.06", "9. 1 2" -> "9.12") without merging separate numbers
-      cleanedText = cleanedText.replace(/\b(\d+)\s*\.\s*(\d(?:\s*\d){0,2})\b/g, (m, p1, p2) => p1 + '.' + p2.replace(/\s+/g, ''));
-      // Support degree symbol or other OCR misread symbols between number and unit (e.g. "9.12\n° km" -> "9.12 km")
-      cleanedText = cleanedText.replace(/([\d\s\.,_]+)\s*[°oO®•\*]\s*(km|KM|Km|mi|MI|Mi)/gi, '$1 $2');
-      // Support degree symbol as decimal point specifically when followed by double dots (Garmin Connect style: "8 ° 43.." -> "8.43..")
-      cleanedText = cleanedText.replace(/(\d+)\s*[°oO®•\*]\s*(\d+)\s*\.\./g, '$1.$2..');
+      // 1. 문자 기본 정리 및 공백 조율
+      let cleanedText = rawText;
+      
+      // o / O -> 0 변환 (숫자 내에 있는 문자 오독 처리)
+      cleanedText = cleanedText.replace(/\b(\d+)[oO](\d+)\b/g, '$10$2');
+      cleanedText = cleanedText.replace(/\b(\d+)[oO]\b/g, '$10');
+      cleanedText = cleanedText.replace(/\b[oO](\d+)\b/g, '0$1');
+      cleanedText = cleanedText.replace(/\b(\d+)\.([oO])([oO])\b/g, '$1.00');
+      cleanedText = cleanedText.replace(/\b(\d+)\.(\d)([oO])\b/g, '$1.$20');
+      cleanedText = cleanedText.replace(/\b(\d+)\.([oO])(\d)\b/g, '$1.0$3');
 
-      // 1. 날짜 파싱 및 시계 시간 제외 목록 구축
+      // 날짜 형태나 소수점/시각 등의 기호 간 공백 최소화
+      cleanedText = cleanedText.replace(/(\d+)\s*\.\s*(\d+)/g, '$1.$2');
+      cleanedText = cleanedText.replace(/(\d+)\s*:\s*(\d+)/g, '$1:$2');
+      cleanedText = cleanedText.replace(/(\d+)\s*[=,_]\s*(\d+)/g, '$1.$2');
+      cleanedText = cleanedText.replace(/(\d+)\s*([/\-])\s*(\d+)/g, '$1$2$3');
+
+      // 2. 소수점/공백 오독 데이터 보정 (예: 752km -> 7.52km, 5 00 km -> 5.00km)
+      const unitPattern = '(?:km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|crm|crn|oo|o)';
+      const unitRegex1 = new RegExp('\\b(\\d+)\\s+(\\d{2})\\s*' + unitPattern + '\\b', 'gi');
+      const unitRegex2 = new RegExp('\\b(\\d+)(\\d{2})\\s*' + unitPattern + '\\b', 'gi');
+      
+      cleanedText = cleanedText.replace(unitRegex1, '$1.$2 km');
+      cleanedText = cleanedText.replace(unitRegex2, '$1.$2 km');
+
+      // 키워드 주변 3~4자리 정수(예: 거리\n500)에 소수점 자동 삽입
+      cleanedText = cleanedText.replace(/(거리|distance|gps|dist|경로|공간)([\s\S]{0,20})\b(\d+)\s+(\d{2})\b/gi, (m, p1, p2, p3, p4) => {
+        if (p2.includes('.') || p2.includes(':') || p2.includes(';')) return m;
+        return p1 + p2 + p3 + '.' + p4;
+      });
+      cleanedText = cleanedText.replace(/(거리|distance|gps|dist|경로|공간)([\s\S]{0,20})\b(\d+)(\d{2})\b/gi, (m, p1, p2, p3, p4) => {
+        if (p2.includes('.') || p2.includes(':') || p2.includes(';')) return m;
+        return p1 + p2 + p3 + '.' + p4;
+      });
+      cleanedText = cleanedText.replace(/\b(\d+)\s+(\d{2})\b([\s\S]{0,20})(거리|distance|gps|dist|경로|공간)/gi, (m, p1, p2, p3, p4) => {
+        if (p3.includes('.') || p3.includes(':') || p3.includes(';')) return m;
+        return p1 + '.' + p2 + p3 + p4;
+      });
+      cleanedText = cleanedText.replace(/\b(\d+)(\d{2})\b([\s\S]{0,20})(거리|distance|gps|dist|경로|공간)/gi, (m, p1, p2, p3, p4) => {
+        if (p3.includes('.') || p3.includes(':') || p3.includes(';')) return m;
+        return p1 + '.' + p2 + p3 + p4;
+      });
+
+      // 3. 날짜 추출 (YYYY/MM/DD, YY/MM/DD, MM월 DD일, YYYY년 MM월 DD일 등)
       let detectedDate = null;
+      let dateMatch;
+      
+      const yyyyMmDdKor = /(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/i;
+      if (dateMatch = yyyyMmDdKor.exec(cleanedText)) {
+        detectedDate = `${dateMatch[1]}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[3]).padStart(2, '0')}`;
+      }
+      
+      if (!detectedDate) {
+        const yyyyMmDdSymbols = /\b(20\d{2})[-/.]\s*(\d{1,2})[-/.]\s*(\d{1,2})\b/;
+        if (dateMatch = yyyyMmDdSymbols.exec(cleanedText)) {
+          detectedDate = `${dateMatch[1]}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[3]).padStart(2, '0')}`;
+        }
+      }
+      
+      if (!detectedDate) {
+        const mmDdKor = /\b(\d{1,2})\s*월\s*(\d{1,2})\s*일/i;
+        if (dateMatch = mmDdKor.exec(cleanedText)) {
+          const today = new Date();
+          const yyyy = today.getFullYear();
+          detectedDate = `${yyyy}-${String(dateMatch[1]).padStart(2, '0')}-${String(dateMatch[2]).padStart(2, '0')}`;
+        }
+      }
+
+      if (!detectedDate) {
+        const yyMmDdSymbols = /\b(\d{2})[-/.]\s*(\d{1,2})[-/.]\s*(\d{1,2})\b/;
+        if (dateMatch = yyMmDdSymbols.exec(cleanedText)) {
+          detectedDate = `20${dateMatch[1]}-${String(dateMatch[2]).padStart(2, '0')}-${String(dateMatch[3]).padStart(2, '0')}`;
+        }
+      }
+
+      // 시계 시간(오전/오후 촬영 시각 등) 수집하여 시간 파싱에서 제외
       let ignoredTimes = [];
-
-      // 헬퍼 함수: 위첨자/슬래시가 1로 인식된 경우 (예: 6/10 -> 6110) 분할 분석
-      const parseMisreadSlashDate = (yyyy, digitsStr) => {
-        for (let i = 1; i <= 2; i++) {
-          if (i > digitsStr.length) break;
-          const monthStr = digitsStr.substring(0, i);
-          const remainder = digitsStr.substring(i);
-          if (remainder.startsWith('1')) {
-            const dayStr = remainder.substring(1);
-            const m = parseInt(monthStr);
-            const d = parseInt(dayStr);
-            if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-              return `${yyyy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-            }
-          }
-        }
-        return null;
-      };
-
-      // 포맷 1: YYYY/MM/DD 또는 YYYY-MM-DD (슬래시가 1로 오독된 경우 포함)
-      const dateClockRegex = /(20\d{2})([/\.\-1])\s*(\d{1,2})\s*([/\.\-1])\s*(\d{1,2})/g;
-      let dateClockMatch;
-      while ((dateClockMatch = dateClockRegex.exec(cleanedText)) !== null) {
-        const yyyy = dateClockMatch[1];
-        const mm = dateClockMatch[3];
-        const dd = dateClockMatch[5];
-        const m = parseInt(mm);
-        const d = parseInt(dd);
-        if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-          detectedDate = `${yyyy}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          break;
-        }
-      }
-
-      // 포맷 1.5: 연도 뒤에 슬래시가 누락/오독되어 YYYY/MMDD 형태인 경우
-      if (!detectedDate) {
-        const dateMisreadSlashRegex = /(20\d{2})[/\.\-1]\s*(\d{3,4})\b/g;
-        let match = dateMisreadSlashRegex.exec(cleanedText);
-        if (match) {
-          const yyyy = match[1];
-          const digitsStr = match[2];
-          const res = parseMisreadSlashDate(yyyy, digitsStr);
-          if (res) detectedDate = res;
-        }
-      }
-
-      // 포맷 2: YYYY년 MM월 DD일
-      if (!detectedDate) {
-        const korDateRegex = /(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/g;
-        let match = korDateRegex.exec(cleanedText);
-        if (match) {
-          const yyyy = match[1];
-          const mm = String(parseInt(match[2])).padStart(2, '0');
-          const dd = String(parseInt(match[3])).padStart(2, '0');
-          detectedDate = `${yyyy}-${mm}-${dd}`;
-        }
-      }
-
-      // 포맷 3: YYYY년 MM월 (일 정보가 오독된 경우 - 오늘 날짜로 대체)
-      if (!detectedDate) {
-        const korYearMonthRegex = /(20\d{2})\s*년\s*(\d{1,2})\s*월/g;
-        let match = korYearMonthRegex.exec(cleanedText);
-        if (match) {
-          const yyyy = match[1];
-          const mm = String(parseInt(match[2])).padStart(2, '0');
-          const today = new Date();
-          const dd = String(today.getDate()).padStart(2, '0');
-          detectedDate = `${yyyy}-${mm}-${dd}`;
-        }
-      }
-
-      // 포맷 4: MM월 DD일 또는 MM2DD2 (월/일 한글이 숫자 2 등으로 오독된 경우 포함)
-      if (!detectedDate) {
-        const shortKorDateRegex = /(\d{1,2})\s*(?:월|2)\s*(\d{1,2})\s*(?:일|2)/g;
-        let match = shortKorDateRegex.exec(cleanedText);
-        if (match) {
-          const today = new Date();
-          const yyyy = String(today.getFullYear());
-          const mm = String(parseInt(match[1])).padStart(2, '0');
-          const dd = String(parseInt(match[2])).padStart(2, '0');
-          detectedDate = `${yyyy}-${mm}-${dd}`;
-        }
-      }
-
-      // 시계 시간 제외 목록 구축 (날짜 옆 시간 또는 오늘 시계 시간 제외)
-      const clockRegex = /(?:오전|오후|AM|PM)?\s*(\d{1,2})[:;.,\s_-](\d{2})\s*(?:오전|오후|AM|PM)?/g;
+      const clockRegex = /(?:오전|오후|AM|PM)?\s*(\d{1,2})[:;](\d{2})\s*(?:오전|오후|AM|PM)?/gi;
       let clockMatch;
       while ((clockMatch = clockRegex.exec(cleanedText)) !== null) {
         const hour = parseInt(clockMatch[1]);
@@ -268,242 +244,168 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         }
       }
 
-      // 2. 거리 파싱 (휴리스틱 채점 방식 도입)
+      // 4. 시간(Duration) 파싱
+      let timeCandidates = [];
+      const colonTimeRegex = /\b(?:(\d{1,2})[:;])?(\d{1,2})[:;](\d{2})\b/g;
+      let timeMatch;
+      
+      while ((timeMatch = colonTimeRegex.exec(cleanedText)) !== null) {
+        const part1 = timeMatch[1];
+        const part2 = timeMatch[2];
+        const part3 = timeMatch[3];
+        
+        let totalMinutes = 0;
+        if (part1 !== undefined) {
+          totalMinutes = parseInt(part1) * 60 + parseInt(part2) + parseInt(part3) / 60;
+        } else {
+          totalMinutes = parseInt(part2) + parseInt(part3) / 60;
+        }
+        
+        timeCandidates.push({
+          minutes: totalMinutes,
+          index: timeMatch.index,
+          text: timeMatch[0]
+        });
+      }
+
+      const textTimeRegex = /\b(\d+)\s*(?:분|min|minute|minutes)\b/gi;
+      while ((timeMatch = textTimeRegex.exec(cleanedText)) !== null) {
+        timeCandidates.push({
+          minutes: parseInt(timeMatch[1]),
+          index: timeMatch.index,
+          text: timeMatch[0]
+        });
+      }
+
+      // 시간 후보 채점
+      let bestTimeCandidate = null;
+      let bestTimeScore = -9999;
+      
+      for (let cand of timeCandidates) {
+        let score = 0;
+        const mins = cand.minutes;
+        const index = cand.index;
+        
+        if (mins >= 15 && mins <= 180) score += 100;
+        else if (mins >= 5 && mins <= 300) score += 50;
+        
+        if (index < 60) score -= 150; // 상단 상태표시줄 시계 패널티
+        
+        const contextBefore = cleanedText.substring(Math.max(0, index - 15), index);
+        const contextAfter = cleanedText.substring(index + cand.text.length, index + cand.text.length + 15);
+        const nearby = (contextBefore + ' ' + contextAfter).toLowerCase();
+        
+        if (nearby.includes('오전') || nearby.includes('오후') || nearby.includes('am') || nearby.includes('pm') || nearby.includes('@')) {
+          score -= 200; // 단순 현재시각
+        }
+        if (nearby.includes('/km') || nearby.includes('pace') || nearby.includes('페이스') || nearby.includes('/mi') || nearby.includes('min/km')) {
+          score -= 150; // 페이스 정보 제외
+        }
+        
+        if (score > bestTimeScore) {
+          bestTimeScore = score;
+          bestTimeCandidate = mins;
+        }
+      }
+      
+      let duration = bestTimeScore > 0 ? Math.round(bestTimeCandidate) : null;
+
+      // 5. 거리(Distance) 파싱
       let floatCandidates = [];
       
-      // A. 정규식 1: 숫자 + 단위 형태 매칭 (명시적 거리 매칭)
-      const distRegex = /([\d\s\.,_]+)\s*(km|KM|Km|lkm|krn|kin|mi|MI|Mi|kn|rn|crm|crn|oo|,\s*oo|,\s*a|;,\s*a|,,|,,a|,\s*o)\b/gi;
-      let match;
-      while ((match = distRegex.exec(cleanedText)) !== null) {
-        let numStr = match[1].replace(/\s+/g, '');
-        numStr = numStr.replace(/[\.,_]+/g, '.');
+      // A. 숫자 + 단위 매칭
+      const distRegex = new RegExp('([\\d\\s\\.,_]+)\\s*' + unitPattern + '\\b', 'gi');
+      let dMatch;
+      while ((dMatch = distRegex.exec(cleanedText)) !== null) {
+        let numStr = dMatch[1].replace(/\s+/g, '').replace(/[\.,_]+/g, '.');
         if (numStr.startsWith('.')) numStr = numStr.substring(1);
         if (numStr.endsWith('.')) numStr = numStr.slice(0, -1);
 
         const val = parseFloat(numStr);
         if (!isNaN(val) && val > 0 && val < 100) {
-          const charBefore = match.index > 0 ? cleanedText[match.index - 1] : '';
-          const afterText = cleanedText.substring(match.index + match[0].length);
-          const isPace = charBefore === ':' || charBefore === ';' || afterText.trim().startsWith('/h') || afterText.trim().startsWith('h');
-          
           floatCandidates.push({
             val: val,
-            index: match.index,
+            index: dMatch.index,
             hasExplicitUnit: true,
-            isPace: isPace,
-            originalMatch: match[1]
+            originalMatch: dMatch[1]
           });
         }
       }
 
-      // B. 정규식 2: 텍스트 전체에서 임의의 소수점 형태 매칭
+      // B. 일반 소수점 매칭
       const floatRegex = /\b(\d+)\.(\d{1,3})\b/g;
       let floatMatch;
       while ((floatMatch = floatRegex.exec(cleanedText)) !== null) {
         const val = parseFloat(floatMatch[0]);
         if (val > 0 && val < 100) {
           const index = floatMatch.index;
-          // 이미 단위 기반 매칭에 포함된 후보는 스킵
           const isAlreadyAdded = floatCandidates.some(c => Math.abs(c.index - index) < 5);
           if (!isAlreadyAdded) {
             floatCandidates.push({
               val: val,
               index: index,
               hasExplicitUnit: false,
-              isPace: false,
               originalMatch: floatMatch[0]
             });
           }
         }
       }
 
-      // C. 휴리스틱 채점으로 가장 적합한 달리기 거리 후보 선출
+      // 거리 후보 채점
       let bestDistanceCandidate = null;
       let bestDistanceScore = -9999;
-
-      for (let candidate of floatCandidates) {
-        const val = candidate.val;
-        const index = candidate.index;
-        const orig = candidate.originalMatch || String(val);
+      
+      for (let cand of floatCandidates) {
+        const val = cand.val;
+        const index = cand.index;
+        const orig = cand.originalMatch || String(val);
         
         let score = 0;
-
-        // ① 값의 플로지빌리티 (일반적인 훈련 거리는 2km ~ 30km 사이가 가장 많음)
-        if (val >= 2.0 && val <= 30.0) {
-          score += 30;
-        } else if (val >= 1.0 && val <= 100.0) {
-          score += 10;
-        }
-
-        // ② 인덱스 위치 (러닝 거리는 항상 요약 화면 최상단 타이틀 옆/아래에 크게 배치되므로 텍스트 앞쪽일수록 가점)
-        if (index < 300) {
-          score += 40;
-        } else if (index < 500) {
-          score += 15;
-        }
-
-        // ③ 소수점 이하 두자리 가점 (러닝 기록은 거의 항상 7.06, 8.43, 9.12 처럼 소수점 2자리로 표기됨)
-        // 3.2, 4.6, 16.0 같은 1자리 지표들과 구별하기 위한 장치
+        
+        if (val >= 2.0 && val <= 30.0) score += 50;
+        else if (val >= 1.0 && val <= 50.0) score += 20;
+        else score -= 100;
+        
         const hasTwoDecimals = /\b\d+\.\d{2}\b/.test(orig);
-        if (hasTwoDecimals) {
-          score += 50;
-        }
-
-        // ④ 명시적 거리 단위 동반 여부
-        if (candidate.hasExplicitUnit && !candidate.isPace) {
-          score += 80;
-        }
-
-        if (candidate.isPace) {
-          score -= 300; // 페이스/속도 수치 강력 페널티
-        }
-
-        // ⑤ 주변 단어(콘텍스트) 분석
-        const contextBefore = cleanedText.substring(Math.max(0, index - 15), index);
+        if (hasTwoDecimals) score += 50;
+        
+        const contextBefore = cleanedText.substring(Math.max(0, index - 15), index).toLowerCase();
         const contextAfter = cleanedText.substring(index + orig.length, index + orig.length + 20).toLowerCase();
-        const firstLineAfter = contextAfter.split('\n')[0];
-
-        // 주변 텍스트에 '거리', 'distance', 'km', 'mi' 단어 존재 시 가점 (페이스/속도 단위는 거리 단위에서 제외)
-        const isContextPace = firstLineAfter.includes('km/h') || firstLineAfter.includes('/km') || firstLineAfter.includes('min/km') || firstLineAfter.includes('mi/h') || firstLineAfter.includes('/mi');
-        const hasDistanceKeyword = contextBefore.toLowerCase().includes('거리') || 
-                                     contextBefore.toLowerCase().includes('distance') || 
-                                     (firstLineAfter.includes('거리') && !isContextPace) || 
-                                     (firstLineAfter.includes('distance') && !isContextPace) ||
-                                     (firstLineAfter.includes('km') && !isContextPace) ||
-                                     (firstLineAfter.includes('mi') && !isContextPace);
-        if (hasDistanceKeyword) {
-          score += 100;
-        }
-
-        // ⑥ 페널티 및 제외 규칙
-        // 닫는 괄호 등이 인접한 경우 (예: 기기 명칭 "Forerunner 945)") 페널티
-        if (firstLineAfter.trim().startsWith(')') || firstLineAfter.trim().startsWith(']')) {
-          score -= 100;
-        }
-
-        // 날짜/시간 패턴과의 오독 제외
-        const adjBefore = contextBefore.trim();
-        const adjAfter = contextAfter.trim();
-        const isDatePattern = adjBefore.endsWith('/') || adjBefore.endsWith('-') || (adjBefore.endsWith('.') && /\d$/.test(adjBefore)) ||
-                              adjAfter.startsWith('/') || adjAfter.startsWith('-') || (adjAfter.startsWith('.') && /^\.\d/.test(adjAfter));
-        if (isDatePattern) {
-          score -= 150;
-        }
-
-        // 페이스, 시간, 케이던스, 심박수, 칼로리, 보폭 등 타 지표 키워드 매칭 시 강력 페널티
-        // spm, bpm, kcal, watts, ml, ms, cm, 기온(°c), 습도(%), 보폭 단독 미터(m) 단위, 속도/페이스 단위
-        const isExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min|분|초|\/km|\/mi|km\/h|mi\/h)/i.test(firstLineAfter) ||
-                               (/\bm\b/i.test(firstLineAfter) && !candidate.hasExplicitUnit);
-        if (isExcludedUnit) {
-          score -= 150;
-        }
-
-        // 훈련 효과 지표 (유산소, 무산소) 키워드 페널티
-        const isTrainingEffect = contextBefore.includes('산소') || firstLineAfter.includes('산소');
-        if (isTrainingEffect) {
-          score -= 150;
-        }
-
-        console.log(`Candidate Distance ${val} Score: ${score} (hasExplicitUnit: ${candidate.hasExplicitUnit}, contextAfter: "${firstLineAfter.trim()}")`);
-
+        const nearbyText = contextBefore + ' ' + contextAfter;
+        
+        const hasDistanceKeyword = nearbyText.includes('거리') || nearbyText.includes('distance') || nearbyText.includes('dist') ||
+                                     nearbyText.includes('km') || nearbyText.includes('mi');
+        if (hasDistanceKeyword) score += 150;
+        
+        const isExcluded = nearbyText.includes('/km') || nearbyText.includes('pace') || nearbyText.includes('페이스') || 
+                           nearbyText.includes('speed') || nearbyText.includes('속도') || nearbyText.includes('속력') ||
+                           nearbyText.includes('bpm') || nearbyText.includes('심박') || nearbyText.includes('heart') ||
+                           nearbyText.includes('spm') || nearbyText.includes('케이던스') || nearbyText.includes('cadence') ||
+                           nearbyText.includes('kcal') || nearbyText.includes('칼로리') || nearbyText.includes('calories') ||
+                           nearbyText.includes('watts') || nearbyText.includes('유산소') || nearbyText.includes('무산소') ||
+                           nearbyText.includes('°c') || nearbyText.includes('%') || nearbyText.includes('luma') ||
+                           nearbyText.includes('ms');
+        if (isExcluded) score -= 300;
+        
+        if (cand.hasExplicitUnit && !isExcluded) score += 100;
+        if (index < 120 && !nearbyText.includes('거리') && !nearbyText.includes('distance')) score -= 100;
+        
+        console.log(`Distance Candidate ${val} score: ${score} (nearby: "${nearbyText.replace(/\s+/g, ' ')}")`);
+        
         if (score > bestDistanceScore) {
           bestDistanceScore = score;
           bestDistanceCandidate = val;
         }
       }
-
+      
       let distance = bestDistanceScore > -50 ? bestDistanceCandidate : null;
 
-      // 3. 시간 파싱 (hh:mm:ss 또는 mm:ss 형태)
-      // 단일 라인 매칭을 위해 [ \t] 사용, 소수점도 시간 구분자로 일부 허용 (Tesseract 오인 대응)
-      const mmssRegex = /\b(\d{1,2})[ \t]*([:;., \t_-])[ \t]*(\d{2})\b/g;
-      let durCandidates = [];
-
-      while ((match = mmssRegex.exec(cleanedText)) !== null) {
-        const val1 = parseInt(match[1]);
-        const val2 = parseInt(match[3]);
-        const fullMatch = match[0];
-        const index = match.index;
-        const sep = match[2];
-        
-        // 날짜와 결합된 시계 시간(오전/오후 촬영 시각)은 제외
-        const timeStr = `${val1}:${val2}`;
-        const paddedTimeStr = `${String(val1).padStart(2, '0')}:${String(val2).padStart(2, '0')}`;
-        if (ignoredTimes.includes(timeStr) || ignoredTimes.includes(paddedTimeStr)) {
-          continue;
-        }
-
-        // 페이스 정보(/km, min/km) 제외 (인접한 경우 오인 방지를 위해 첫글자 검사 포함)
-        const afterMatch = cleanedText.substring(index + fullMatch.length);
-        const trimmedAfter = afterMatch.trim();
-        const firstCharAfter = trimmedAfter.length > 0 ? trimmedAfter[0] : '';
-        if (
-          firstCharAfter === '/' || 
-          trimmedAfter.toLowerCase().startsWith('min') || 
-          trimmedAfter.toLowerCase().startsWith('pace')
-        ) {
-          continue;
-        }
-
-        // 소수점 구분자일 때는 뒤에 거리 단위(km, mi)나 보폭(m)이 오면 거리 수치이므로 스킵
-        if (sep === '.' || sep === ',') {
-          const contextBefore = cleanedText.substring(Math.max(0, index - 5), index);
-          if (contextBefore.toLowerCase().includes('km') || contextBefore.toLowerCase().includes('mi') ||
-              trimmedAfter.toLowerCase().startsWith('km') || trimmedAfter.toLowerCase().startsWith('m') || trimmedAfter.toLowerCase().startsWith('mi')) {
-            continue;
-          }
-        }
-
-        // 특정 단위 제외 (기온, 심박수 등 - 단, 같은 줄만 검증)
-        const contextAfter = cleanedText.substring(index + fullMatch.length, index + fullMatch.length + 15).toLowerCase();
-        const firstLineAfter = contextAfter.split('\n')[0];
-        const isExcludedUnit = /(?:°c|deg|spm|bpm|kcal|watts|ml|ms|cm)/i.test(firstLineAfter) ||
-                               (/%/i.test(firstLineAfter) && (val1 + val2 / 60) < 25);
-        if (isExcludedUnit) {
-          continue;
-        }
-
-        const totalMin = val1 + val2 / 60;
-        if (totalMin > 5 && totalMin < 300) {
-          durCandidates.push(totalMin);
-        }
-      }
-
-      // 4. XX분/XXmin 형태 추가 매칭
-      const textMinRegex = /(\d+)\s*(?:min|minute|minutes|분)\b/gi;
-      while ((match = textMinRegex.exec(cleanedText)) !== null) {
-        const val = parseInt(match[1]);
-        if (val > 5 && val < 300) {
-          durCandidates.push(val);
-        }
-      }
-
-      // 시간 정보 추출
-      let duration = null;
-      if (durCandidates.length > 0) {
-        // 만약 거리가 있다면, 페이스가 합리적(3.0 ~ 15.0 min/km)인 시간대 후보군을 최우선 선택
-        if (distance) {
-          let bestDur = null;
-          for (let dur of durCandidates) {
-            const pace = dur / distance;
-            if (pace >= 3.0 && pace <= 15.0) {
-              bestDur = dur;
-              break;
-            }
-          }
-          duration = bestDur ? Math.round(bestDur) : Math.round(durCandidates[0]);
-        } else {
-          duration = Math.round(durCandidates[0]);
-        }
-      }
-
-      // 5. 활동 시간대 판별 (오전 05:00 ~ 09:00 사이인지 체크)
+      // 6. 결과 반영 및 시간대 판별 (오전 05:00 ~ 09:00 여부)
       let timeOfDayVal = 'afternoon';
       const isMorningText = /am|오전|morning/i.test(cleanedText);
       
-      // 날짜 옆에서 검출된 시작 시각(시계 시간)을 바탕으로 오전 5~9시 사이 여부 판별
       if (ignoredTimes.length > 0) {
-        const firstClock = ignoredTimes[0]; // e.g. "09:19"
+        const firstClock = ignoredTimes[0];
         const hour = parseInt(firstClock.split(':')[0]);
         if (hour >= 5 && hour <= 9) {
           timeOfDayVal = 'morning';
