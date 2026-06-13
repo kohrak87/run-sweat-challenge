@@ -289,7 +289,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         if (mins >= 15 && mins <= 180) score += 100;
         else if (mins >= 5 && mins <= 300) score += 50;
         
-        if (index < 60) score -= 150; // 상단 상태표시줄 시계 패널티
+        if (index < 15) score -= 150; // 상단 상태표시줄 시계 패널티
         
         const contextBefore = cleanedText.substring(Math.max(0, index - 15), index);
         const contextAfter = cleanedText.substring(index + cand.text.length, index + cand.text.length + 15);
@@ -298,8 +298,24 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
         if (nearby.includes('오전') || nearby.includes('오후') || nearby.includes('am') || nearby.includes('pm') || nearby.includes('@')) {
           score -= 200; // 단순 현재시각
         }
-        if (nearby.includes('/km') || nearby.includes('pace') || nearby.includes('페이스') || nearby.includes('/mi') || nearby.includes('min/km')) {
-          score -= 150; // 페이스 정보 제외
+
+        const isDatePrefix = /(?:(?:\d{4}|\d{2}|\d{1,2})[-/.]\d{1,2}(?:[-/.]\d{1,2})?\s*(?:\([월화수목금토일]\))?|\d{1,2}월\s*\d{1,2}일\s*@?)\s*$/i.test(contextBefore.trim());
+        if (isDatePrefix) {
+          score -= 250; // 이 시각은 날짜의 일부이므로 페널티
+        }
+
+        // Precise association check for pace to avoid penalizing other fields in grid
+        const nextWord = contextAfter.trim().split(/\s+/)[0];
+        const isDirectlyPaceUnit = /(?:\/km|\/mi|min\/km|min\/mi|페이스|pace)/i.test(nextWord) || contextAfter.startsWith('"');
+        
+        if (isDirectlyPaceUnit) {
+          score -= 300; // Heavily penalize pace
+        } else {
+          // Mild penalty if pace keywords are nearby but not directly attached
+          const hasPaceNearby = nearby.includes('/km') || nearby.includes('pace') || nearby.includes('페이스') || nearby.includes('/mi');
+          if (hasPaceNearby) {
+            score -= 50;
+          }
         }
         
         if (score > bestTimeScore) {
@@ -377,18 +393,25 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
                                      nearbyText.includes('km') || nearbyText.includes('mi');
         if (hasDistanceKeyword) score += 150;
         
-        const isExcluded = nearbyText.includes('/km') || nearbyText.includes('pace') || nearbyText.includes('페이스') || 
-                           nearbyText.includes('speed') || nearbyText.includes('속도') || nearbyText.includes('속력') ||
-                           nearbyText.includes('bpm') || nearbyText.includes('심박') || nearbyText.includes('heart') ||
-                           nearbyText.includes('spm') || nearbyText.includes('케이던스') || nearbyText.includes('cadence') ||
-                           nearbyText.includes('kcal') || nearbyText.includes('칼로리') || nearbyText.includes('calories') ||
-                           nearbyText.includes('watts') || nearbyText.includes('유산소') || nearbyText.includes('무산소') ||
-                           nearbyText.includes('°c') || nearbyText.includes('%') || nearbyText.includes('luma') ||
-                           nearbyText.includes('ms');
-        if (isExcluded) score -= 300;
+        // Precise unit association check
+        const nextWord = contextAfter.trim().split(/\s+/)[0];
+        const isDirectlyExcludedUnit = /(?:%|°c|deg|spm|bpm|kcal|watts|ml|ms|cm|pace|min|분|초|\/km|\/mi|km\/h|mi\/h)/i.test(nextWord);
         
-        if (cand.hasExplicitUnit && !isExcluded) score += 100;
-        if (index < 120 && !nearbyText.includes('거리') && !nearbyText.includes('distance')) score -= 100;
+        if (isDirectlyExcludedUnit) {
+          score -= 300; // Penalize only if directly associated
+        } else {
+          // If not directly associated, check if the keyword is nearby but apply a milder penalty if it is a different field
+          const hasPaceNearby = nearbyText.includes('/km') || nearbyText.includes('pace') || nearbyText.includes('페이스');
+          const hasHeartNearby = nearbyText.includes('bpm') || nearbyText.includes('심박');
+          const hasCalNearby = nearbyText.includes('kcal') || nearbyText.includes('칼로리');
+          
+          if (hasPaceNearby || hasHeartNearby || hasCalNearby) {
+            score -= 50; // Mild penalty for other fields in the grid
+          }
+        }
+        
+        if (cand.hasExplicitUnit && !isDirectlyExcludedUnit) score += 100;
+        if (index < 120 && !nearbyText.includes('거리') && !nearbyText.includes('distance')) score -= 50;
         
         console.log(`Distance Candidate ${val} score: ${score} (nearby: "${nearbyText.replace(/\s+/g, ' ')}")`);
         
@@ -645,7 +668,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
           <div>
             <h2 className="text-lg font-semibold text-slate-300 flex items-center gap-2">
               <span>{timeLeft.isClosed ? '주간 숙제 집계 마감 (정산 대기 중)' : '주간 숙제 집계 마감까지'}</span>
-              <span className="text-[10px] bg-slate-850 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-800">v1.0.5</span>
+              <span className="text-[10px] bg-slate-850 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-800">v1.0.6</span>
             </h2>
             <p className="text-xs text-slate-400">
               {timeLeft.isClosed ? '새로운 주간 레이스는 토요일 00:00에 시작합니다.' : '매주 토요일 00:00 ~ 금요일 12:00 PM (금요일 저녁 러닝 제외)'}
@@ -822,7 +845,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
               <span className="flex items-center gap-2">
                 <Activity className="text-brand-cyan" /> 🔍 러닝 인증샷 AI 자동 분석
               </span>
-              <span className="text-[10px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-700">v1.0.5</span>
+              <span className="text-[10px] bg-slate-850 text-slate-500 px-1.5 py-0.5 rounded font-mono border border-slate-800">v1.0.6</span>
             </h3>
             
             <div className="space-y-4 mb-6">
