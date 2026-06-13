@@ -677,34 +677,34 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-4 mt-8 space-y-8">
         
         {/* Navigation Tabs */}
-        <div className="flex border-b border-slate-900">
+        <div className="flex border-b border-slate-900 overflow-x-auto whitespace-nowrap scrollbar-none -mx-4 px-4">
           <button 
             onClick={() => setActiveTab('dashboard')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'dashboard' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all shrink-0 ${activeTab === 'dashboard' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
             대시보드
           </button>
           <button 
             onClick={() => setActiveTab('race')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'race' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all shrink-0 ${activeTab === 'race' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
             벌금 레이스 현황
           </button>
           <button 
             onClick={() => setActiveTab('feed')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'feed' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all shrink-0 ${activeTab === 'feed' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
             인증 피드
           </button>
           <button 
             onClick={() => setActiveTab('rules')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all ${activeTab === 'rules' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all shrink-0 ${activeTab === 'rules' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
             숙제방 규칙
           </button>
           <button 
             onClick={() => setActiveTab('admin')}
-            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all flex items-center gap-1.5 ${activeTab === 'admin' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
+            className={`px-6 py-3 font-semibold text-sm border-b-2 transition-all shrink-0 flex items-center gap-1.5 ${activeTab === 'admin' ? 'border-brand-neon text-brand-neon font-bold' : 'border-transparent text-slate-400 hover:text-white'}`}
           >
             <Settings size={14} /> 관리자
           </button>
@@ -809,7 +809,7 @@ export default function App() {
       {/* 접속자 프로필 선택 모달 */}
       {showProfileSelector && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
-          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+          <div className="glass-panel max-w-md w-full max-h-[90vh] overflow-y-auto rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse scrollbar-none">
             <h3 className="font-extrabold text-xl text-white text-center mb-2">🏃‍♂️ RunSweat 챌린지</h3>
             
             {selectedMemberToVerify ? (

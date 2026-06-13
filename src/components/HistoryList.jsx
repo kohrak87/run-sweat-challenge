@@ -239,7 +239,7 @@ export default function HistoryList({ histories, onDeleteRun, onEditRun, auditLo
       {/* 인증 상세 보기 모달 */}
       {selectedHistory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
-          <div className="glass-panel max-w-lg w-full rounded-2xl p-6 border-slate-700 shadow-2xl relative">
+          <div className="glass-panel max-w-lg w-full max-h-[90vh] overflow-y-auto rounded-2xl p-6 border-slate-700 shadow-2xl relative scrollbar-none">
             <button 
               onClick={() => setSelectedHistory(null)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white text-lg font-bold p-1"

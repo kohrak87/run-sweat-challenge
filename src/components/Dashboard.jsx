@@ -840,7 +840,7 @@ export default function Dashboard({ currentUser, onUploadSuccess }) {
       {/* 인증 분석 수동 확인 모달 */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="glass-panel max-w-md w-full rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse">
+          <div className="glass-panel max-w-md w-full max-h-[90vh] overflow-y-auto rounded-2xl p-6 border-slate-700 shadow-2xl animate-neon-pulse scrollbar-none">
             <h3 className="font-extrabold text-xl text-white mb-4 flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Activity className="text-brand-cyan" /> 🔍 러닝 인증샷 AI 자동 분석
